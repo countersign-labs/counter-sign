@@ -32,8 +32,8 @@ Read the spec: [spec/countersign-spec.md](spec/countersign-spec.md) (~3 pages).
 Add approval to any tool call in five lines:
 
 ```ts
-import { wrapAction } from "countersign";
-import { TelegramAdapter } from "countersign/adapters/telegram";
+import { wrapAction } from "counter-sign";
+import { TelegramAdapter } from "counter-sign/adapters/telegram";
 
 const deploy = wrapAction(deployProd,
   { action: "deploy.prod", summary: "Deploy v2.1.0 to production", risk_tier: "high",
@@ -90,7 +90,7 @@ embedded key only proves it wasn't tampered with — anyone can mint one. To
 *act* on a receipt, bind it to the authority you trust:
 
 ```ts
-import { verifyCountersignature } from "countersign";
+import { verifyCountersignature } from "counter-sign";
 // Only true if the receipt was signed by an authority key you trust:
 verifyCountersignature(receipt, { trustedKeys: [OUR_AUTHORITY_PUBLIC_KEY] });
 ```

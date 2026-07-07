@@ -90,6 +90,18 @@ decision must share that key (set `COUNTERSIGN_AUTHORITY_KEY`).
 
 CLAIRE by Agentsstack Pte. Ltd. is the first reference deployment.
 
+## Compliance and evidence
+
+Countersign gives regulated teams a machine-enforceable, auditable
+human-oversight control — and the evidence auditors ask for: a signed,
+portable record of who authorized a consequential action, under which rule,
+and when. It is a mechanism for *implementing* oversight — such as the human
+oversight expected under EU AI Act Article 14 (Regulation (EU) 2024/1689) —
+not a guarantee of compliance; a protocol produces evidence, while
+organizations are what pass audits. See [COMPLIANCE.md](COMPLIANCE.md) for how
+a Countersignature maps to control areas in SOC 2, ISO/IEC 27001, the NIST AI
+RMF, and EU AI Act Article 14.
+
 ## Repository layout
 
 | Path | What |

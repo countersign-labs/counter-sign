@@ -126,6 +126,6 @@ RMF, and EU AI Act Article 14.
 
 - **Code** (`src/`, `schemas/`, `examples/`, `tests/`): [Apache-2.0](LICENSE),
   Copyright 2026 Haridarman Kumaresan
-- **Specification text** (`spec/`): [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- **Specification text** (`spec/`): CC BY 4.0 — see [LICENSE-CC-BY-4.0.txt](LICENSE-CC-BY-4.0.txt) (<https://creativecommons.org/licenses/by/4.0/>).
 - Spec author: Haridarman Kumaresan.
 - Sponsor: Agentsstack Pte. Ltd.

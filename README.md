@@ -4,6 +4,8 @@
 
 **MCP gave agents tools. A2A gave agents colleagues. Countersign gives agents a boss.**
 
+![Countersign in motion — sign an Intent, route it to a human, the human countersigns, out comes a signed portable receipt.](assets/countersign-brag.svg)
+
 Countersign is an open protocol for agent-to-human authorization: an agent
 signs its intent; a human countersigns it into authority.
 

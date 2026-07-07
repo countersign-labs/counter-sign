@@ -5,6 +5,13 @@ Every adapter is configured through environment variables only — copy
 channel. All adapters share `COUNTERSIGN_AUTHORITY_KEY` (generate with
 `npm run keygen`), the ed25519 seed that signs Countersignatures.
 
+**Quorum note.** An Intent's `quorum` (M-of-N / two-person approval) needs a
+channel where distinct approvers can each respond: the chat adapters (Telegram,
+Discord, Slack, WhatsApp) and the local approver accumulate distinct-actor
+approvals and keep their buttons live until the quorum is met or someone vetoes.
+The email adapter is single-recipient and supports `quorum: 1` only — it refuses
+anything higher at delivery.
+
 ## Telegram (low effort — works with no public URL)
 
 1. Message [@BotFather](https://t.me/BotFather), `/newbot`, copy the token

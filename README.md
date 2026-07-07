@@ -13,7 +13,8 @@ Countersign standardizes **agent-to-human authority** with four nouns and
 nothing else:
 
 - **Intent** — a signed JSON envelope: what the agent wants to do, the risk
-  tier, who may approve it, how long to wait, and what silence means.
+  tier, who may approve it, how many must approve (`quorum`, for two-person /
+  M-of-N control), how long to wait, and what silence means.
 - **Route** — delivery to where approvers live (Telegram, Discord, Slack,
   WhatsApp, email) via deliberately dumb, pluggable adapters.
 - **Countersignature** — a signed, portable receipt of the decision,
@@ -66,6 +67,12 @@ A Countersignature is byte-for-byte the same shape and equally verifiable
 whichever adapter produced it — receipts don't care whether the yes came
 from a chat button or an email link.
 
+**Two-person / M-of-N approval.** Set `quorum: N` on an Intent to require N
+*distinct* approvers before the action runs; any single approver vetoes. This
+works on the chat channels and the local approver, where distinct people can
+each respond (`npm run demo:quorum` shows a no-network two-person flow). The
+single-recipient email flow supports `quorum: 1` only and refuses more.
+
 ## Why receipts, not booleans
 
 An approval that evaporates after the `if` statement is worth nothing in an
@@ -95,7 +102,8 @@ CLAIRE by Agentsstack Pte. Ltd. is the first reference deployment.
 Countersign gives regulated teams a machine-enforceable, auditable
 human-oversight control — and the evidence auditors ask for: a signed,
 portable record of who authorized a consequential action, under which rule,
-and when. It is a mechanism for *implementing* oversight — such as the human
+and when, with optional two-person / M-of-N sign-off for the most sensitive
+actions. It is a mechanism for *implementing* oversight — such as the human
 oversight expected under EU AI Act Article 14 (Regulation (EU) 2024/1689) —
 not a guarantee of compliance; a protocol produces evidence, while
 organizations are what pass audits. See [COMPLIANCE.md](COMPLIANCE.md) for how

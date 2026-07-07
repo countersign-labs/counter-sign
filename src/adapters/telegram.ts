@@ -1,0 +1,176 @@
+// Copyright 2026 Haridarman Kumaresan
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0; see LICENSE at repo root.
+
+import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  authorityKeyFromEnv,
+  decisionPayload,
+  formatIntent,
+  parseDecisionPayload,
+  readBody,
+  requireEnv,
+  warnOnce,
+  PendingDecisions,
+  type Adapter,
+} from "../adapter.js";
+import { CountersignError } from "../core/errors.js";
+import type { Countersignature, Intent } from "../core/types.js";
+
+export interface TelegramConfig {
+  botToken: string;
+  chatId: string;
+  authorityKey: string;
+  /** "poll" long-polls getUpdates (no public URL needed); "webhook" expects updates via webhookHandler(). */
+  mode: "poll" | "webhook";
+  /** Optional shared secret checked against X-Telegram-Bot-Api-Secret-Token. */
+  webhookSecret?: string;
+  apiBase: string;
+}
+
+export function telegramConfigFromEnv(overrides: Partial<TelegramConfig> = {}): TelegramConfig {
+  return {
+    botToken: overrides.botToken ?? requireEnv("TELEGRAM_BOT_TOKEN"),
+    chatId: overrides.chatId ?? requireEnv("TELEGRAM_CHAT_ID"),
+    authorityKey: overrides.authorityKey ?? authorityKeyFromEnv(),
+    mode: overrides.mode ?? (process.env.TELEGRAM_MODE as "poll" | "webhook") ?? "poll",
+    webhookSecret: overrides.webhookSecret ?? process.env.TELEGRAM_WEBHOOK_SECRET,
+    apiBase: overrides.apiBase ?? process.env.TELEGRAM_API_BASE ?? "https://api.telegram.org",
+  };
+}
+
+/**
+ * Telegram Bot API adapter. Delivers the Intent as a message with inline
+ * Approve/Reject buttons; the decision arrives as a callback_query, either
+ * long-polled (default) or via webhook.
+ */
+export class TelegramAdapter implements Adapter {
+  readonly channel = "telegram";
+  private readonly pending = new PendingDecisions();
+  private readonly cfg: TelegramConfig;
+  private offset = 0;
+  private polling = false;
+  private closed = false;
+
+  constructor(config: Partial<TelegramConfig> = {}) {
+    this.cfg = telegramConfigFromEnv(config);
+  }
+
+  async deliver(intent: Intent): Promise<void> {
+    await this.api("sendMessage", {
+      chat_id: this.cfg.chatId,
+      text: formatIntent(intent),
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "✅ Approve", callback_data: decisionPayload(intent, "approve") },
+            { text: "❌ Reject", callback_data: decisionPayload(intent, "reject") },
+          ],
+        ],
+      },
+    });
+  }
+
+  awaitDecision(intent: Intent): Promise<Countersignature> {
+    const decision = this.pending.wait(intent);
+    if (this.cfg.mode === "poll") void this.pollLoop();
+    return decision;
+  }
+
+  /**
+   * Process one Telegram update. Shared by the polling loop and the webhook
+   * handler, so a Countersignature is identical regardless of transport.
+   */
+  async handleUpdate(update: any): Promise<Countersignature | null> {
+    const cb = update?.callback_query;
+    if (!cb?.data) return null;
+    const parsed = parseDecisionPayload(cb.data);
+    if (!parsed || !this.pending.has(parsed.intentId)) {
+      await this.api("answerCallbackQuery", { callback_query_id: cb.id, text: "Request no longer pending." }).catch(() => {});
+      return null;
+    }
+    const actor = `telegram:${cb.from?.username ?? cb.from?.id ?? "unknown"}`;
+    const cs = this.pending.settle(parsed.intentId, parsed.decision, actor, this.cfg.authorityKey);
+    await this.api("answerCallbackQuery", { callback_query_id: cb.id, text: `Recorded: ${parsed.decision}` }).catch(() => {});
+    if (cb.message) {
+      await this.api("editMessageText", {
+        chat_id: cb.message.chat.id,
+        message_id: cb.message.message_id,
+        text: `${cb.message.text}\n\nDecision: ${parsed.decision.toUpperCase()} by ${actor}`,
+      }).catch(() => {});
+    }
+    return cs;
+  }
+
+  /** Node HTTP handler for TELEGRAM_MODE=webhook (set via setWebhook). */
+  webhookHandler(): (req: IncomingMessage, res: ServerResponse) => void {
+    if (!this.cfg.webhookSecret) {
+      warnOnce(
+        "telegram:no-webhook-secret",
+        "Telegram webhook is running WITHOUT a secret token. Set TELEGRAM_WEBHOOK_SECRET (and pass it to " +
+          "setWebhook) so spoofed updates are rejected; otherwise anyone who learns an intent_id can forge a decision.",
+      );
+    }
+    return (req, res) => {
+      void (async () => {
+        if (req.method !== "POST") {
+          res.writeHead(405).end();
+          return;
+        }
+        if (this.cfg.webhookSecret && req.headers["x-telegram-bot-api-secret-token"] !== this.cfg.webhookSecret) {
+          res.writeHead(401).end();
+          return;
+        }
+        const body = await readBody(req);
+        try {
+          await this.handleUpdate(JSON.parse(body.toString("utf8")));
+        } catch {
+          // Malformed update; acknowledge anyway so Telegram does not retry forever.
+        }
+        res.writeHead(200, { "content-type": "text/plain" }).end("ok");
+      })();
+    };
+  }
+
+  close(): void {
+    this.closed = true;
+    this.pending.abortAll(new CountersignError("telegram adapter closed"));
+  }
+
+  private async pollLoop(): Promise<void> {
+    if (this.polling) return;
+    this.polling = true;
+    try {
+      while (!this.closed && this.pending.size > 0) {
+        try {
+          const updates: any[] = await this.api("getUpdates", {
+            offset: this.offset,
+            timeout: 25,
+            allowed_updates: ["callback_query"],
+          });
+          for (const update of updates) {
+            this.offset = update.update_id + 1;
+            await this.handleUpdate(update);
+          }
+        } catch {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  private async api(method: string, body: unknown): Promise<any> {
+    const res = await fetch(`${this.cfg.apiBase}/bot${this.cfg.botToken}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok !== true) {
+      throw new CountersignError(`telegram ${method} failed: ${data.description ?? res.status}`);
+    }
+    return data.result;
+  }
+}

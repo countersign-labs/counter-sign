@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://countersign.dev/schemas/intent.schema.json",
+  "title": "Countersign Intent",
+  "description": "A signed statement of what an agent wants to do, awaiting human countersignature. Countersign spec v0.1.",
+  "type": "object",
+  "required": [
+    "countersign",
+    "intent_id",
+    "agent",
+    "action",
+    "summary",
+    "risk_tier",
+    "approvers",
+    "timeout",
+    "default",
+    "callback",
+    "created_at",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "countersign": {
+      "description": "Protocol version.",
+      "const": "0.1"
+    },
+    "intent_id": {
+      "description": "Unique id of this intent (UUID).",
+      "type": "string",
+      "format": "uuid"
+    },
+    "agent": {
+      "description": "The requesting agent's identity and signing key.",
+      "type": "object",
+      "required": ["id", "public_key"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "public_key": {
+          "description": "base64url-encoded raw 32-byte ed25519 public key (43 chars, no padding).",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        }
+      }
+    },
+    "action": {
+      "description": "Machine-oriented name of the action, e.g. \"billing.refund\".",
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "description": "Human-oriented one-line description shown to the approver.",
+      "type": "string",
+      "minLength": 1
+    },
+    "risk_tier": {
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "approvers": {
+      "description": "Who may countersign, as channel:address strings.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "timeout": {
+      "description": "Seconds after created_at at which the Default fires. Upper bound keeps timeout*1000 within a 32-bit millisecond timer.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483
+    },
+    "default": {
+      "description": "The decision that fires at the deadline if nobody answers.",
+      "enum": ["approve", "reject"]
+    },
+    "callback": {
+      "description": "Optional URL the Countersignature is POSTed to, or null.",
+      "anyOf": [{ "type": "string", "format": "uri" }, { "type": "null" }]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "signature": {
+      "description": "base64url ed25519 signature by agent.public_key over the canonical envelope without this field (86 chars, no padding).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{86}$"
+    }
+  }
+}

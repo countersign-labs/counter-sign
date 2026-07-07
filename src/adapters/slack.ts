@@ -143,7 +143,7 @@ export class SlackAdapter implements Adapter {
                 result.status === "resolved"
                   ? {
                       replace_original: true,
-                      text: `Countersign: ${result.decision!.toUpperCase()} (last: <@${payload.user?.id}>) — intent ${parsed.intentId}`,
+                      text: `counter-sign: ${result.decision!.toUpperCase()} (last: <@${payload.user?.id}>) — intent ${parsed.intentId}`,
                     }
                   : {
                       response_type: "ephemeral",

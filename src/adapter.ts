@@ -10,7 +10,7 @@ import { generateKeypair } from "./core/keys.js";
 import type { Countersignature, Decision, Intent, Resolution } from "./core/types.js";
 
 /**
- * The single interface every Countersign adapter implements. Adapters are
+ * The single interface every counter-sign adapter implements. Adapters are
  * intentionally dumb: deliver the Intent to where the approvers live, and
  * hand back the resolved decision once enough of them have decided. Timeout
  * and Default resolution live in core, not here.
@@ -158,7 +158,7 @@ export function decisionPayload(intent: Intent, decision: Decision): string {
 export function formatIntent(intent: Intent): string {
   const quorum = quorumOf(intent);
   return [
-    "Countersign approval request",
+    "counter-sign approval request",
     `Action:  ${intent.action}`,
     `Summary: ${intent.summary}`,
     `Risk:    ${intent.risk_tier}`,

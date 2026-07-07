@@ -1,4 +1,4 @@
-# Countersign — an open protocol for agent-to-human authorization
+# counter-sign — an open protocol for agent-to-human authorization
 
 **Version:** 0.1 (draft)
 **Author:** Haridarman Kumaresan
@@ -10,7 +10,7 @@
 An agent signs its intent; a human countersigns it into authority.
 
 MCP connects agents to tools. A2A connects agents to each other. Neither says
-what happens when an agent needs a human's yes. Countersign fills that leg
+what happens when an agent needs a human's yes. counter-sign fills that leg
 with exactly four nouns: an **Intent** (what the agent wants to do), a
 **Route** (how the question reaches a human), a **Countersignature** (the
 signed, portable receipt of the decision), and a **Default** (what silence
@@ -59,7 +59,7 @@ authority to act.
 **Quorum.** `quorum` expresses M-of-N approval: the action is authorized only
 when that many *distinct* approvers have approved (see §3). It is a
 backward-compatible addition — an Intent that omits `quorum`, or sets it to
-`1`, behaves exactly as single-approver Countersign. `quorum: 2` is the
+`1`, behaves exactly as single-approver counter-sign. `quorum: 2` is the
 two-person ("four-eyes") control appropriate to the most sensitive high-risk
 actions. A `quorum` greater than the number of distinct approvers who can be
 reached can never be satisfied and will always resolve to the Default. A
@@ -152,7 +152,7 @@ The authorization is evidenced by the *set* of Countersignatures that produced
 it — the `quorum` `approve` receipts for an approval, or the single `reject`
 receipt for a veto. Every receipt in the set is independently verifiable as
 above and bound to the same `intent_id`. For `quorum: 1` this reduces to a
-single Countersignature, identical to single-approver Countersign.
+single Countersignature, identical to single-approver counter-sign.
 
 ### Why these fields exist
 
@@ -224,5 +224,5 @@ deliberately left to implementations for now.
 
 ---
 
-*Countersign is spec plus reference implementation, not a framework. If you
+*counter-sign is spec plus reference implementation, not a framework. If you
 can render a message and receive a button press, you can implement a Route.*

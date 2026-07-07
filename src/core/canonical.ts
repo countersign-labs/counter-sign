@@ -4,14 +4,14 @@
 
 /**
 /**
- * Bound on nesting depth. Countersign envelopes are shallow; this only exists
+ * Bound on nesting depth. counter-sign envelopes are shallow; this only exists
  * so a hostile, deeply-nested object handed to a verifier cannot blow the
  * stack (a denial-of-service). Verifiers treat the resulting throw as "invalid".
  */
 const MAX_DEPTH = 64;
 
 /**
- * Canonical JSON serialization used for all Countersign signatures:
+ * Canonical JSON serialization used for all counter-sign signatures:
  * object keys sorted lexicographically at every depth, no insignificant
  * whitespace, UTF-8 bytes. `undefined` members are omitted; non-finite
  * numbers are rejected. This is what gets signed — both sides must

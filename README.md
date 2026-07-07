@@ -1,19 +1,19 @@
-![Countersign — an agent signs its intent; a human countersigns it into authority.](assets/banner.svg)
+![counter-sign — an agent signs its intent; a human countersigns it into authority.](assets/banner.svg)
 
-# Countersign
+# counter-sign
 
-**MCP gave agents tools. A2A gave agents colleagues. Countersign gives agents a boss.**
+**MCP gave agents tools. A2A gave agents colleagues. counter-sign gives agents a boss.**
 
-[![Countersign in motion — an autonomous agent's $42,000 action is gated, a human taps Approve, and a signed portable receipt is produced.](assets/countersign-brag.gif)](assets/countersign-brag.mp4)
+[![counter-sign in motion — an autonomous agent's $42,000 action is gated, a human taps Approve, and a signed portable receipt is produced.](assets/countersign-brag.gif)](assets/countersign-brag.mp4)
 
-Countersign is an open protocol for agent-to-human authorization: an agent
+counter-sign is an open protocol for agent-to-human authorization: an agent
 signs its intent; a human countersigns it into authority.
 
 The agent stack has a missing leg. MCP standardizes **agent-to-tool**. A2A
 standardizes **agent-to-agent**. Neither says what happens at the moment
 that actually matters — when an agent is about to do something irreversible
 and needs a human's yes, on whatever channel that human actually reads.
-Countersign standardizes **agent-to-human authority** with four nouns and
+counter-sign standardizes **agent-to-human authority** with four nouns and
 nothing else:
 
 - **Intent** — a signed JSON envelope: what the agent wants to do, the risk
@@ -103,7 +103,7 @@ CLAIRE by Agentsstack Pte. Ltd. is the first reference deployment.
 
 ## Compliance and evidence
 
-Countersign gives regulated teams a machine-enforceable, auditable
+counter-sign gives regulated teams a machine-enforceable, auditable
 human-oversight control — and the evidence auditors ask for: a signed,
 portable record of who authorized a consequential action, under which rule,
 and when, with optional two-person / M-of-N sign-off for the most sensitive

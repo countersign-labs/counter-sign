@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Countersign are documented here. The format follows
+All notable changes to counter-sign are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reaches
 1.0. Until then, `0.x` minor bumps may include breaking changes.

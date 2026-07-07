@@ -1,4 +1,4 @@
-# Countersign security review — v0.1
+# counter-sign security review — v0.1
 
 Adversarial review of the protocol and reference implementation, with fixes
 applied in the same pass. Scope: the crypto core, the shim, all five

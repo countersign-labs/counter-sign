@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://countersign.dev/schemas/countersignature.schema.json",
+  "title": "Countersignature",
+  "description": "A signed, portable receipt of a decision over an Intent. Countersign spec v0.1.",
+  "type": "object",
+  "required": [
+    "countersign",
+    "intent_id",
+    "decision",
+    "actor",
+    "policy",
+    "timestamp",
+    "public_key",
+    "signature"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "countersign": {
+      "description": "Protocol version.",
+      "const": "0.1"
+    },
+    "intent_id": {
+      "description": "The Intent this receipt decides.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "decision": {
+      "enum": ["approve", "reject"]
+    },
+    "actor": {
+      "description": "Who decided, as channel:address — e.g. \"telegram:8675309\", or \"default:timeout\" when the Default fired.",
+      "type": "string",
+      "minLength": 1
+    },
+    "policy": {
+      "description": "\"approver\" for an explicit human decision; \"default\" when the Intent's declared Default fired at the deadline.",
+      "enum": ["approver", "default"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "public_key": {
+      "description": "base64url-encoded raw 32-byte ed25519 public key of the signing authority (43 chars, no padding).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "signature": {
+      "description": "base64url ed25519 signature by public_key over the canonical receipt without this field (86 chars, no padding).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{86}$"
+    }
+  }
+}

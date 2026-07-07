@@ -1,3 +1,13 @@
+```ansi
+[38;2;192;160;80m█████ █████ █   █ █   █ █████ █████ ████  █████ █████ █████ █   █[0m
+[38;2;192;160;80m█     █   █ █   █ ██  █   █   █     █   █ █       █   █     ██  █[0m
+[38;2;192;160;80m█     █   █ █   █ █ █ █   █   ████  ████  █████   █   █  ██ █ █ █[0m
+[38;2;192;160;80m█     █   █ █   █ █  ██   █   █     █  █      █   █   █   █ █  ██[0m
+[38;2;192;160;80m█████ █████ █████ █   █   █   █████ █   █ █████ █████ █████ █   █[0m
+
+[38;2;207;200;172mAn agent signs its intent. A human countersigns it into authority.[0m
+```
+
 # Countersign
 
 **MCP gave agents tools. A2A gave agents colleagues. Countersign gives agents a boss.**

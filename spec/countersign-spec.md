@@ -1,7 +1,8 @@
 # Countersign — an open protocol for agent-to-human authorization
 
 **Version:** 0.1 (draft)
-**Author:** Haridarman K
+**Author:** Haridarman Kumaresan
+**Sponsor:** 
 **License:** This specification text is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Reference code is licensed separately under Apache-2.0.
 
 ## Abstract

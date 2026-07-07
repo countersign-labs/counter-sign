@@ -88,7 +88,7 @@ The `wrapAction` shim does this for you: it only accepts a decision signed by
 the same authority key the runtime holds, so the adapter that collects the
 decision must share that key (set `COUNTERSIGN_AUTHORITY_KEY`).
 
-Kaviyam is the first reference deployment.
+Kaviyam by  is the first reference deployment.
 
 ## Repository layout
 
@@ -105,4 +105,5 @@ Kaviyam is the first reference deployment.
 - **Code** (`src/`, `schemas/`, `examples/`, `tests/`): [Apache-2.0](LICENSE),
   Copyright 2026 Haridarman Kumaresan
 - **Specification text** (`spec/`): [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-- Spec author: Haridarman K.
+- Spec author: Haridarman Kumaresan.
+- Sponsor: 

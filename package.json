@@ -1,9 +1,13 @@
 {
-  "name": "countersign",
+  "name": "counter-sign",
   "version": "0.1.0",
   "description": "Open protocol for agent-to-human authorization. An agent signs its intent; a human countersigns it into authority.",
   "license": "Apache-2.0",
   "author": "Haridarman Kumaresan",
+  "repository": { "type": "git", "url": "git+https://github.com/countersign-labs/countersign.git" },
+  "homepage": "https://github.com/countersign-labs/countersign#readme",
+  "bugs": { "url": "https://github.com/countersign-labs/countersign/issues" },
+  "keywords": ["agent", "authorization", "human-in-the-loop", "approval", "countersign", "ed25519", "protocol", "mcp", "a2a", "ai-safety"],
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -19,12 +23,14 @@
     "schemas",
     "spec",
     "LICENSE",
+    "LICENSE-CC-BY-4.0.txt",
     "NOTICE",
     "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test",
     "keygen": "tsx scripts/keygen.ts",
     "gen:payloads": "tsx scripts/gen-payloads.ts",
     "demo:local": "tsx examples/local.ts",

@@ -24,6 +24,9 @@ export function createIntent(fields: IntentFields, agent: AgentIdentity): Intent
   if (!RISK_TIERS.has(fields.risk_tier)) throw new CountersignError(`invalid risk_tier: ${fields.risk_tier}`);
   if (!Array.isArray(fields.approvers) || fields.approvers.length === 0)
     throw new CountersignError("Intent.approvers must be a non-empty array");
+  const quorum = fields.quorum ?? 1;
+  if (!Number.isInteger(quorum) || quorum < 1)
+    throw new CountersignError("Intent.quorum must be an integer >= 1");
   // Upper bound keeps timeout*1000 within Node's setTimeout range (2^31-1 ms),
   // so the Default always fires at the deadline rather than being clamped and
   // firing immediately — a silent-early-approve footgun if default is "approve".
@@ -39,6 +42,7 @@ export function createIntent(fields: IntentFields, agent: AgentIdentity): Intent
     summary: fields.summary,
     risk_tier: fields.risk_tier,
     approvers: [...fields.approvers],
+    quorum,
     timeout: fields.timeout,
     default: fields.default,
     callback: fields.callback ?? null,
@@ -46,6 +50,11 @@ export function createIntent(fields: IntentFields, agent: AgentIdentity): Intent
   };
   const signature = signContext(agent.keypair.secretKey, INTENT_CONTEXT, canonicalize(unsigned));
   return { ...unsigned, signature };
+}
+
+/** Distinct approvals required to authorize an Intent (defaults to 1). */
+export function quorumOf(intent: Intent): number {
+  return Number.isInteger(intent.quorum) && intent.quorum >= 1 ? intent.quorum : 1;
 }
 
 /** Verify the agent's signature over the canonical envelope. Never throws. */

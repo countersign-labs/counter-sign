@@ -15,7 +15,7 @@ import {
   type Adapter,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
-import type { Countersignature, Intent } from "../core/types.js";
+import type { Intent, Resolution } from "../core/types.js";
 
 export interface SlackConfig {
   botToken: string;
@@ -91,7 +91,7 @@ export class SlackAdapter implements Adapter {
     });
   }
 
-  awaitDecision(intent: Intent): Promise<Countersignature> {
+  awaitResolution(intent: Intent): Promise<Resolution> {
     return this.pending.wait(intent);
   }
 
@@ -134,15 +134,25 @@ export class SlackAdapter implements Adapter {
           const parsed = parseDecisionPayload(action?.value ?? "");
           if (parsed && this.pending.has(parsed.intentId)) {
             const actor = `slack:${payload.user?.id ?? "unknown"}`;
-            this.pending.settle(parsed.intentId, parsed.decision, actor, this.cfg.authorityKey);
-            if (payload.response_url) {
+            const result = this.pending.settle(parsed.intentId, parsed.decision, actor, this.cfg.authorityKey);
+            if (result && payload.response_url) {
+              // Resolved → replace the message (removes buttons). Pending → an
+              // ephemeral progress note, leaving the original message and its
+              // buttons intact so other approvers can still complete the quorum.
+              const update =
+                result.status === "resolved"
+                  ? {
+                      replace_original: true,
+                      text: `Countersign: ${result.decision!.toUpperCase()} (last: <@${payload.user?.id}>) — intent ${parsed.intentId}`,
+                    }
+                  : {
+                      response_type: "ephemeral",
+                      text: `Recorded ${result.collected}/${result.quorum} — awaiting more approvers.`,
+                    };
               void fetch(payload.response_url, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
-                body: JSON.stringify({
-                  replace_original: true,
-                  text: `Countersign: ${parsed.decision.toUpperCase()} by <@${payload.user?.id}> (intent ${parsed.intentId})`,
-                }),
+                body: JSON.stringify(update),
               }).catch(() => {});
             }
           }

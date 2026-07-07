@@ -7,7 +7,7 @@ import { awaitWithDefault } from "./core/defaults.js";
 import { IntentRejectedError } from "./core/errors.js";
 import { createIntent, type AgentIdentity } from "./core/intent.js";
 import { generateKeypair } from "./core/keys.js";
-import type { Countersignature, Intent, IntentFields } from "./core/types.js";
+import type { Countersignature, Intent, IntentFields, Resolution } from "./core/types.js";
 
 export interface WrapOptions {
   /** Signing identity of the requesting agent. Defaults to a per-process keypair. */
@@ -16,8 +16,10 @@ export interface WrapOptions {
   authorityKey?: string;
   /** Observe the signed Intent before delivery. */
   onIntent?: (intent: Intent) => void;
-  /** Observe the Countersignature (approve, reject, or default) once produced. */
+  /** Observe the decisive receipt (last approval, the veto, or the default). */
   onDecision?: (cs: Countersignature) => void;
+  /** Observe the full Resolution — all contributing receipts — once produced. */
+  onResolution?: (resolution: Resolution) => void;
 }
 
 let processAgent: AgentIdentity | undefined;
@@ -56,23 +58,25 @@ export function wrapAction<A extends unknown[], R>(
 
     await adapter.deliver(intent);
     const authority = opts.authorityKey ?? authorityKeyFromEnv();
-    const cs = await awaitWithDefault(intent, adapter.awaitDecision(intent), authority);
-    opts.onDecision?.(cs);
-    if (intent.callback) void postCallback(intent.callback, cs);
+    const resolution = await awaitWithDefault(intent, adapter.awaitResolution(intent), authority);
+    const decisive = resolution.countersignatures[resolution.countersignatures.length - 1];
+    opts.onResolution?.(resolution);
+    if (decisive) opts.onDecision?.(decisive);
+    if (intent.callback) void postCallback(intent.callback, resolution);
 
-    if (cs.decision !== "approve") throw new IntentRejectedError(cs, intent);
+    if (resolution.decision !== "approve") throw new IntentRejectedError(resolution, intent);
     return await fn(...args);
   };
 }
 
-async function postCallback(url: string, cs: Countersignature): Promise<void> {
+async function postCallback(url: string, resolution: Resolution): Promise<void> {
   try {
     await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(cs),
+      body: JSON.stringify(resolution),
     });
   } catch {
-    // Callback delivery is best-effort; the receipt still exists locally.
+    // Callback delivery is best-effort; the receipts still exist locally.
   }
 }

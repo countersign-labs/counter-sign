@@ -15,7 +15,7 @@ import {
   type Adapter,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
-import type { Countersignature, Intent } from "../core/types.js";
+import type { Intent, Resolution } from "../core/types.js";
 
 export interface WhatsAppConfig {
   accessToken: string;
@@ -108,7 +108,7 @@ export class WhatsAppAdapter implements Adapter {
     }
   }
 
-  awaitDecision(intent: Intent): Promise<Countersignature> {
+  awaitResolution(intent: Intent): Promise<Resolution> {
     return this.pending.wait(intent);
   }
 

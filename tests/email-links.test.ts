@@ -11,7 +11,7 @@ import { EmailAdapter, createLinkToken, verifyLinkToken } from "../src/adapters/
 import { createIntent } from "../src/core/intent.js";
 import { generateKeypair } from "../src/core/keys.js";
 import { deadline } from "../src/core/defaults.js";
-import type { Countersignature, Intent } from "../src/core/types.js";
+import type { Intent, Resolution } from "../src/core/types.js";
 
 const authority = generateKeypair();
 const agent = { id: "agent:test", keypair: generateKeypair() };
@@ -92,9 +92,9 @@ describe("GET cannot decide (mail-scanner prefetch safety)", () => {
     harness = await makeHarness();
     const intent = makeIntent();
     await harness.adapter.deliver(intent);
-    const decision = harness.adapter.awaitDecision(intent);
-    let settled: Countersignature | undefined;
-    void decision.then((cs) => (settled = cs));
+    const decision = harness.adapter.awaitResolution(intent);
+    let settled: Resolution | undefined;
+    void decision.then((r) => (settled = r));
 
     const token = createLinkToken(intent, "approve", authority.secretKey);
     for (let i = 0; i < 3; i++) {
@@ -107,9 +107,9 @@ describe("GET cannot decide (mail-scanner prefetch safety)", () => {
 
     const post = await postDecision(harness, token);
     expect(post.status).toBe(200);
-    const cs = await decision;
-    expect(cs.decision).toBe("approve");
-    expect(cs.actor).toBe("email:ops@countersign.local");
+    const r = await decision;
+    expect(r.decision).toBe("approve");
+    expect(r.countersignatures[0].actor).toBe("email:ops@countersign.local");
   });
 });
 
@@ -118,7 +118,7 @@ describe("single-use", () => {
     harness = await makeHarness();
     const intent = makeIntent();
     await harness.adapter.deliver(intent);
-    const decision = harness.adapter.awaitDecision(intent);
+    const decision = harness.adapter.awaitResolution(intent);
 
     const approveToken = createLinkToken(intent, "approve", authority.secretKey);
     expect((await postDecision(harness, approveToken)).status).toBe(200);
@@ -133,11 +133,11 @@ describe("single-use", () => {
     harness = await makeHarness();
     const intent = makeIntent();
     await harness.adapter.deliver(intent);
-    const decision = harness.adapter.awaitDecision(intent);
+    const decision = harness.adapter.awaitResolution(intent);
 
     await postDecision(harness, createLinkToken(intent, "reject", authority.secretKey));
-    const cs = await decision;
-    expect(cs.decision).toBe("reject");
+    const r = await decision;
+    expect(r.decision).toBe("reject");
 
     const approveAttempt = await postDecision(harness, createLinkToken(intent, "approve", authority.secretKey));
     expect(approveAttempt.status).toBe(410);
@@ -152,7 +152,7 @@ describe("expiry matches the Intent timeout", () => {
     // the expiry inside the link always equals the Intent's deadline.
     const expired: Intent = { ...intent, created_at: new Date(Date.now() - 301_000).toISOString() };
     await harness.adapter.deliver(expired);
-    const decision = harness.adapter.awaitDecision(expired);
+    const decision = harness.adapter.awaitResolution(expired);
     let settled = false;
     void decision.then(() => (settled = true), () => {});
 

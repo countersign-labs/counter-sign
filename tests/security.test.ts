@@ -18,6 +18,7 @@ import {
   LINK_CONTEXT,
   type Countersignature,
   type Intent,
+  type Resolution,
 } from "../src/core/types.js";
 import { DiscordAdapter } from "../src/adapters/discord.js";
 import { SlackAdapter } from "../src/adapters/slack.js";
@@ -60,16 +61,24 @@ describe("authority binding — integrity is not authority", () => {
   it("awaitWithDefault rejects a decision not signed by the runtime's authority key", async () => {
     const intent = makeIntent();
     // A rogue/compromised adapter returns a self-signed 'approve'.
-    const rogue = Promise.resolve(signDecision(intent, "approve", "attacker:evil", attacker.secretKey));
+    const rogue: Promise<Resolution> = Promise.resolve({
+      decision: "approve",
+      policy: "approver",
+      countersignatures: [signDecision(intent, "approve", "attacker:evil", attacker.secretKey)],
+    });
     await expect(awaitWithDefault(intent, rogue, authority.secretKey)).rejects.toThrow(InvalidCountersignatureError);
   });
 
   it("awaitWithDefault accepts a decision signed by the runtime's authority key", async () => {
     const intent = makeIntent();
-    const good = Promise.resolve(signDecision(intent, "approve", "email:ops", authority.secretKey));
-    const cs = await awaitWithDefault(intent, good, authority.secretKey);
-    expect(cs.decision).toBe("approve");
-    expect(cs.public_key).toBe(authority.publicKey);
+    const good: Promise<Resolution> = Promise.resolve({
+      decision: "approve",
+      policy: "approver",
+      countersignatures: [signDecision(intent, "approve", "email:ops", authority.secretKey)],
+    });
+    const resolution = await awaitWithDefault(intent, good, authority.secretKey);
+    expect(resolution.decision).toBe("approve");
+    expect(resolution.countersignatures[0].public_key).toBe(authority.publicKey);
   });
 });
 

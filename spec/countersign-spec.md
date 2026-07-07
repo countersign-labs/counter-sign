@@ -33,6 +33,7 @@ may authorize it, and what happens if nobody answers.
 | `summary`    | string          | Human-oriented one-liner. This is what the approver decides on; it MUST be truthful about `action`. |
 | `risk_tier`  | enum            | `low` \| `medium` \| `high` \| `critical`. |
 | `approvers`  | string[]        | Who may countersign, as `channel:address` strings (e.g. `telegram:8675309`, `email:ops@example.com`). MUST be non-empty. |
+| `quorum`     | integer         | Number of **distinct** approvers whose `approve` is required to authorize. MUST be ≥ 1. Optional; absent means `1`. |
 | `timeout`    | integer         | Seconds after `created_at` at which the Default fires. MUST be ≥ 1. |
 | `default`    | enum            | `approve` \| `reject` — the decision that fires at the deadline. |
 | `callback`   | string \| null  | Optional URL the Countersignature is POSTed to. |
@@ -54,6 +55,17 @@ a small fixed depth.
 
 An Intent asks; it never authorizes. Holding a signed Intent grants no
 authority to act.
+
+**Quorum.** `quorum` expresses M-of-N approval: the action is authorized only
+when that many *distinct* approvers have approved (see §3). It is a
+backward-compatible addition — an Intent that omits `quorum`, or sets it to
+`1`, behaves exactly as single-approver Countersign. `quorum: 2` is the
+two-person ("four-eyes") control appropriate to the most sensitive high-risk
+actions. A `quorum` greater than the number of distinct approvers who can be
+reached can never be satisfied and will always resolve to the Default. For a
+quorum to be a genuine control the Default SHOULD be `reject`: a `quorum`
+above 1 combined with `default: approve` is self-defeating, since a timeout
+would authorize the action without the required approvers.
 
 ## 2. Route
 
@@ -123,10 +135,24 @@ enforcing an Intent MUST verify that the decision it receives was signed by
 the authority key it trusts for the Route, not merely that the receipt
 verifies against its own embedded key.
 
-A runtime MUST NOT execute the guarded action unless it holds a verifying
-Countersignature with `decision: "approve"` for that exact `intent_id`. One
-Intent yields at most one Countersignature; later decisions on the same
-`intent_id` MUST be ignored.
+A runtime MUST NOT execute the guarded action unless the Intent has been
+**resolved** to `approve`. Resolution collects `approve` Countersignatures
+from *distinct* `actor`s over that exact `intent_id`:
+
+- The Intent is authorized once `quorum` distinct actors have each produced a
+  verifying `approve` Countersignature before the deadline. Repeated approvals
+  from the same `actor` count once and MUST NOT be double-counted toward
+  quorum.
+- Any `reject` Countersignature is a **veto**: it resolves the Intent to
+  `reject` immediately and finally, regardless of how many approvals were
+  already collected. A single approver can always halt the action.
+- Once resolved, further decisions on the same `intent_id` MUST be ignored.
+
+The authorization is evidenced by the *set* of Countersignatures that produced
+it — the `quorum` `approve` receipts for an approval, or the single `reject`
+receipt for a veto. Every receipt in the set is independently verifiable as
+above and bound to the same `intent_id`. For `quorum: 1` this reduces to a
+single Countersignature, identical to single-approver Countersign.
 
 ### Why these fields exist
 
@@ -154,13 +180,15 @@ Silence is never ambiguous. Every Intent declares its `default` and
 `timeout`; together they define the deadline `created_at + timeout` at which
 the Default fires.
 
-- If no Countersignature has been produced by the deadline, the enforcing
-  runtime MUST resolve the Intent to its declared `default`, and SHOULD
-  record that resolution as a Countersignature with
-  `actor: "default:timeout"` and `policy: "default"`, signed by its own
-  authority key. Timeout receipts verify exactly like human ones.
-- A human decision arriving before the deadline wins; one arriving after
-  the deadline MUST be ignored (the Default already decided).
+- If the Intent has not been resolved by the deadline — fewer than `quorum`
+  distinct approvals collected and no veto — the enforcing runtime MUST
+  resolve the Intent to its declared `default`, and SHOULD record that
+  resolution as a Countersignature with `actor: "default:timeout"` and
+  `policy: "default"`, signed by its own authority key. Timeout receipts
+  verify exactly like human ones.
+- A resolution reached before the deadline wins; any decision arriving after
+  the deadline MUST be ignored (the Default already decided). A partial quorum
+  that never completes in time yields the Default, not an approval.
 - `default: "approve"` is legitimate for low-risk actions but SHOULD be
   paired with a short timeout; `risk_tier: "critical"` Intents SHOULD
   declare `default: "reject"`.

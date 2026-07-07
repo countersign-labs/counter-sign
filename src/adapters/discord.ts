@@ -15,7 +15,7 @@ import {
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
 import { hexToBytes, utf8, verifyRaw } from "../core/keys.js";
-import type { Countersignature, Intent } from "../core/types.js";
+import type { Intent, Resolution } from "../core/types.js";
 
 export interface DiscordConfig {
   botToken: string;
@@ -78,7 +78,7 @@ export class DiscordAdapter implements Adapter {
     }
   }
 
-  awaitDecision(intent: Intent): Promise<Countersignature> {
+  awaitResolution(intent: Intent): Promise<Resolution> {
     return this.pending.wait(intent);
   }
 
@@ -119,11 +119,23 @@ export class DiscordAdapter implements Adapter {
           if (parsed && this.pending.has(parsed.intentId)) {
             const user = interaction.member?.user ?? interaction.user;
             const actor = `discord:${user?.id ?? "unknown"}`;
-            this.pending.settle(parsed.intentId, parsed.decision, actor, this.cfg.authorityKey);
+            const result = this.pending.settle(parsed.intentId, parsed.decision, actor, this.cfg.authorityKey);
+            const base = interaction.message?.content ?? "";
+            if (result && result.status === "pending") {
+              // Keep the buttons so other approvers can still complete the quorum.
+              json({
+                type: 7,
+                data: {
+                  content: `${base}\n\nApproval ${result.collected}/${result.quorum} by <@${user?.id}> — awaiting more`,
+                  components: interaction.message?.components ?? [],
+                },
+              });
+              return;
+            }
             json({
-              type: 7, // UPDATE_MESSAGE: strip the buttons so it cannot be pressed twice
+              type: 7, // UPDATE_MESSAGE: strip the buttons now that it is resolved
               data: {
-                content: `${interaction.message?.content ?? ""}\n\nDecision: ${parsed.decision.toUpperCase()} by <@${user?.id}>`,
+                content: `${base}\n\nResolved: ${(result?.decision ?? parsed.decision).toUpperCase()} (last: <@${user?.id}>)`,
                 components: [],
               },
             });

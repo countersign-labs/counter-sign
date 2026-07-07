@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { signDecision } from "../src/core/countersignature.js";
-import { defaultCountersignature } from "../src/core/defaults.js";
+import { defaultResolution } from "../src/core/defaults.js";
 import { createIntent } from "../src/core/intent.js";
 import { generateKeypair } from "../src/core/keys.js";
 
@@ -29,9 +29,23 @@ const intent = createIntent(
   agent,
 );
 
+const quorumIntent = createIntent(
+  {
+    action: "prod.deploy",
+    summary: "Deploy release 2.4.0 to production (two-person rule)",
+    risk_tier: "critical",
+    approvers: ["slack:U024BE7LH", "slack:U07QX9ZLE", "telegram:8675309"],
+    quorum: 2,
+    timeout: 600,
+    default: "reject",
+    callback: null,
+  },
+  agent,
+);
+
 const approved = signDecision(intent, "approve", "telegram:8675309", authority);
 const rejected = signDecision(intent, "reject", "email:ops@example.com", authority);
-const timedOut = defaultCountersignature(intent, authority);
+const timedOut = defaultResolution(intent, authority).countersignatures[0];
 
 const write = (name: string, value: unknown) => {
   writeFileSync(join(dir, name), JSON.stringify(value, null, 2) + "\n");
@@ -39,6 +53,7 @@ const write = (name: string, value: unknown) => {
 };
 
 write("intent.example.json", intent);
+write("intent.quorum.example.json", quorumIntent);
 write("countersignature.approve.example.json", approved);
 write("countersignature.reject.example.json", rejected);
 write("countersignature.default-timeout.example.json", timedOut);

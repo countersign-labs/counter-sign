@@ -13,9 +13,10 @@ import {
   warnOnce,
   PendingDecisions,
   type Adapter,
+  type SettleResult,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
-import type { Countersignature, Intent } from "../core/types.js";
+import type { Intent, Resolution } from "../core/types.js";
 
 export interface TelegramConfig {
   botToken: string;
@@ -71,17 +72,19 @@ export class TelegramAdapter implements Adapter {
     });
   }
 
-  awaitDecision(intent: Intent): Promise<Countersignature> {
-    const decision = this.pending.wait(intent);
+  awaitResolution(intent: Intent): Promise<Resolution> {
+    const resolution = this.pending.wait(intent);
     if (this.cfg.mode === "poll") void this.pollLoop();
-    return decision;
+    return resolution;
   }
 
   /**
    * Process one Telegram update. Shared by the polling loop and the webhook
-   * handler, so a Countersignature is identical regardless of transport.
+   * handler, so the resulting receipts are identical regardless of transport.
+   * Under quorum, an approval that does not yet complete the quorum is
+   * acknowledged and the buttons are kept so other approvers can still decide.
    */
-  async handleUpdate(update: any): Promise<Countersignature | null> {
+  async handleUpdate(update: any): Promise<SettleResult | null> {
     const cb = update?.callback_query;
     if (!cb?.data) return null;
     const parsed = parseDecisionPayload(cb.data);
@@ -90,16 +93,27 @@ export class TelegramAdapter implements Adapter {
       return null;
     }
     const actor = `telegram:${cb.from?.username ?? cb.from?.id ?? "unknown"}`;
-    const cs = this.pending.settle(parsed.intentId, parsed.decision, actor, this.cfg.authorityKey);
-    await this.api("answerCallbackQuery", { callback_query_id: cb.id, text: `Recorded: ${parsed.decision}` }).catch(() => {});
+    const result = this.pending.settle(parsed.intentId, parsed.decision, actor, this.cfg.authorityKey);
+    if (!result) return null;
+    const ack =
+      result.status === "resolved"
+        ? `Recorded: ${result.decision}`
+        : `Recorded (${result.collected}/${result.quorum}); awaiting more approvers`;
+    await this.api("answerCallbackQuery", { callback_query_id: cb.id, text: ack }).catch(() => {});
     if (cb.message) {
+      const note =
+        result.status === "resolved"
+          ? `Resolved: ${result.decision!.toUpperCase()} (last: ${actor})`
+          : `Approval ${result.collected}/${result.quorum} by ${actor} — awaiting more`;
       await this.api("editMessageText", {
         chat_id: cb.message.chat.id,
         message_id: cb.message.message_id,
-        text: `${cb.message.text}\n\nDecision: ${parsed.decision.toUpperCase()} by ${actor}`,
+        text: `${cb.message.text}\n\n${note}`,
+        // Keep the buttons while pending so other approvers can still act.
+        ...(result.status === "resolved" ? {} : { reply_markup: cb.message.reply_markup }),
       }).catch(() => {});
     }
-    return cs;
+    return result;
   }
 
   /** Node HTTP handler for TELEGRAM_MODE=webhook (set via setWebhook). */

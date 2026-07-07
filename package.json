@@ -28,6 +28,7 @@
     "keygen": "tsx scripts/keygen.ts",
     "gen:payloads": "tsx scripts/gen-payloads.ts",
     "demo:local": "tsx examples/local.ts",
+    "demo:quorum": "tsx examples/quorum.ts",
     "demo:email": "tsx examples/email.ts",
     "demo:telegram": "tsx examples/telegram.ts",
     "demo:discord": "tsx examples/discord.ts",

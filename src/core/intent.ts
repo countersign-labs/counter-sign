@@ -27,6 +27,10 @@ export function createIntent(fields: IntentFields, agent: AgentIdentity): Intent
   const quorum = fields.quorum ?? 1;
   if (!Number.isInteger(quorum) || quorum < 1)
     throw new CountersignError("Intent.quorum must be an integer >= 1");
+  // A multi-person quorum with an approve-on-silence Default is self-defeating:
+  // a timeout would authorize the action without the required approvers.
+  if (quorum > 1 && fields.default === "approve")
+    throw new CountersignError("Intent.quorum > 1 must not be combined with default: approve (a timeout would bypass the required approvers)");
   // Upper bound keeps timeout*1000 within Node's setTimeout range (2^31-1 ms),
   // so the Default always fires at the deadline rather than being clamped and
   // firing immediately — a silent-early-approve footgun if default is "approve".

@@ -23,10 +23,14 @@ export function isExpired(intent: Intent, now: number = Date.now()): boolean {
  * never ambiguous — this receipt is as explicit as a human decision.
  */
 export function defaultResolution(intent: Intent, authoritySecret: string): Resolution {
+  // A multi-person quorum always fails closed on timeout: silence must never
+  // authorize an action that required distinct approvers, even if a
+  // non-conforming Intent declared default: approve.
+  const decision = quorumOf(intent) > 1 ? "reject" : intent.default;
   return {
-    decision: intent.default,
+    decision,
     policy: "default",
-    countersignatures: [signDecision(intent, intent.default, "default:timeout", authoritySecret, "default")],
+    countersignatures: [signDecision(intent, decision, "default:timeout", authoritySecret, "default")],
   };
 }
 
@@ -53,8 +57,10 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
       );
   }
 
-  if (resolution.decision === "approve") {
-    // Re-derive the quorum from the receipts; do not trust an asserted count.
+  if (resolution.decision === "approve" && resolution.policy === "approver") {
+    // Re-derive the human quorum from the receipts; do not trust an asserted
+    // count. A policy:"default" approve is the declared timeout fallback, not a
+    // human quorum, so it is not subjected to this check.
     const distinctApprovers = new Set<string>();
     for (const cs of receipts) {
       if (cs.decision !== "approve")

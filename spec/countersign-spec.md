@@ -128,6 +128,26 @@ Countersignature with `decision: "approve"` for that exact `intent_id`. One
 Intent yields at most one Countersignature; later decisions on the same
 `intent_id` MUST be ignored.
 
+### Why these fields exist
+
+A Countersignature is designed to stand on its own as portable audit
+evidence, and each field carries part of that weight:
+
+- `actor` — the attributable identity behind the decision: *who* granted
+  authority, so the record ties back to a specific human (or to the timeout).
+- `policy` — *which rule* required the approval (`approver` vs. `default`),
+  distinguishing a deliberate human decision from a fired Default.
+- `timestamp` — *when* authority was granted, anchoring the decision in time
+  for an audit trail.
+- `signature` — tamper-evidence and standalone verifiability: the record can
+  be checked by any party offline, with no callback to the issuer and no need
+  to trust the system that stored it.
+
+Together these let a Countersignature answer the questions an auditor asks of
+an authorization — who, under which rule, when, and can I trust the record was
+not altered — without depending on the availability or good faith of the
+issuing system.
+
 ## 4. Default
 
 Silence is never ambiguous. Every Intent declares its `default` and

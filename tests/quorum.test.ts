@@ -12,6 +12,7 @@ import { createIntent, quorumOf } from "../src/core/intent.js";
 import { generateKeypair } from "../src/core/keys.js";
 import type { Intent, IntentFields, Resolution } from "../src/core/types.js";
 import { EmailAdapter } from "../src/adapters/email.js";
+import { TelegramAdapter } from "../src/adapters/telegram.js";
 import { wrapAction } from "../src/shim.js";
 
 const agent = { id: "agent:test", keypair: generateKeypair() };
@@ -228,6 +229,41 @@ describe("quorum security", () => {
     // quorum 1 is fine.
     await expect(adapter.deliver(intent(1))).resolves.toBeUndefined();
     adapter.close();
+  });
+});
+
+describe("a real chat adapter accumulates a distinct-user quorum via its handler", () => {
+  it("telegram: two distinct users approving a quorum-2 intent resolves to approve", async () => {
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }));
+    try {
+      const adapter = new TelegramAdapter({ botToken: "t", chatId: "1", authorityKey: authority.secretKey, mode: "webhook" });
+      const i = intent(2);
+      const pending = adapter.awaitResolution(i);
+      const update = (uid: number, decision: string) => ({
+        update_id: uid,
+        callback_query: {
+          id: `c${uid}`,
+          from: { id: uid, username: `u${uid}` },
+          message: { message_id: 1, chat: { id: 1 }, text: "x", reply_markup: {} },
+          data: `cs:${i.intent_id}:${decision}`,
+        },
+      });
+
+      const r1 = await adapter.handleUpdate(update(10, "approve"));
+      expect(r1?.status).toBe("pending"); // one approval is not enough
+      const r2 = await adapter.handleUpdate(update(20, "approve"));
+      expect(r2?.status).toBe("resolved");
+
+      const resolution = await pending;
+      expect(resolution.decision).toBe("approve");
+      expect(resolution.countersignatures).toHaveLength(2);
+      expect(new Set(resolution.countersignatures.map((c) => c.actor)).size).toBe(2);
+      adapter.close();
+    } finally {
+      vi.stubGlobal("fetch", realFetch);
+      vi.unstubAllGlobals();
+    }
   });
 });
 

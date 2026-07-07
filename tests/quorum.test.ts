@@ -198,6 +198,27 @@ describe("quorum security", () => {
     await expect(awaitWithDefault(i, Promise.resolve(mixed), authority.secretKey)).rejects.toThrow();
   });
 
+  it("forbids the self-defeating quorum > 1 + default:approve at construction", () => {
+    expect(() => intent(2, { default: "approve" })).toThrow(/default: approve/);
+    // quorum 1 + default:approve is fine (single-approver low-risk).
+    expect(intent(1, { default: "approve" }).default).toBe("approve");
+  });
+
+  it("times out fail-closed (reject) for a quorum intent even if it declared default:approve", async () => {
+    vi.useFakeTimers();
+    try {
+      // Hand-craft a non-conforming Intent (createIntent would refuse it).
+      const bad = { ...intent(2), default: "approve" as const };
+      const pending = awaitWithDefault(bad, new Promise<Resolution>(() => {}), authority.secretKey);
+      await vi.advanceTimersByTimeAsync(300_000);
+      const r = await pending;
+      expect(r.decision).toBe("reject"); // silence must not authorize a quorum action
+      expect(r.policy).toBe("default");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("the email adapter refuses quorum > 1 at delivery (bearer links cannot represent distinct approvers)", async () => {
     const adapter = new EmailAdapter({
       transport: { sendMail: async () => {}, close: () => {} } as never,

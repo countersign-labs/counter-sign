@@ -62,10 +62,10 @@ backward-compatible addition — an Intent that omits `quorum`, or sets it to
 `1`, behaves exactly as single-approver Countersign. `quorum: 2` is the
 two-person ("four-eyes") control appropriate to the most sensitive high-risk
 actions. A `quorum` greater than the number of distinct approvers who can be
-reached can never be satisfied and will always resolve to the Default. For a
-quorum to be a genuine control the Default SHOULD be `reject`: a `quorum`
-above 1 combined with `default: approve` is self-defeating, since a timeout
-would authorize the action without the required approvers.
+reached can never be satisfied and will always resolve to the Default. A
+`quorum` above 1 MUST NOT be combined with `default: approve`: that is
+self-defeating, since a timeout would authorize the action without the
+required approvers. For a quorum, the Default is therefore always `reject`.
 
 ## 2. Route
 

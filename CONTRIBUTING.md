@@ -1,6 +1,6 @@
-# Contributing to Countersign
+# Contributing to counter-sign
 
-Thanks for your interest. Countersign is intentionally small — a spec plus a
+Thanks for your interest. counter-sign is intentionally small — a spec plus a
 reference implementation, not a framework — so contributions are held to that
 bar: keep it minimal, correct, and well-tested.
 

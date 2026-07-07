@@ -1,6 +1,6 @@
 // Copyright 2026 Haridarman Kumaresan
 // SPDX-License-Identifier: Apache-2.0
-// Shared demo harness: wraps a pretend high-risk action with Countersign,
+// Shared demo harness: wraps a pretend high-risk action with counter-sign,
 // prints the resulting Countersignature, and verifies its signature.
 
 import type { Adapter } from "../src/adapter.js";

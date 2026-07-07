@@ -83,7 +83,7 @@ export function signBytes(secretKey: string, data: Uint8Array): string {
 }
 
 /**
- * Domain-separated signing. Every Countersign signature commits to a context
+ * Domain-separated signing. Every counter-sign signature commits to a context
  * label so a signature minted for one envelope type can never be replayed as
  * another (intent vs. countersignature vs. email link). The signed bytes are
  * `context` + "\n" + `canonical`.

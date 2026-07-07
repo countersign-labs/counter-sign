@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://countersign.dev/schemas/intent.schema.json",
-  "title": "Countersign Intent",
-  "description": "A signed statement of what an agent wants to do, awaiting human countersignature. Countersign spec v0.1.",
+  "title": "counter-sign Intent",
+  "description": "A signed statement of what an agent wants to do, awaiting human countersignature. counter-sign spec v0.1.",
   "type": "object",
   "required": [
     "countersign",

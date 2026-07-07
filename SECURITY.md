@@ -1,6 +1,6 @@
 # Security Policy
 
-Countersign is an authorization protocol: bugs here can let an action run without
+counter-sign is an authorization protocol: bugs here can let an action run without
 a real human's approval, or let a forged receipt pass as authority. We take
 reports seriously.
 
@@ -25,7 +25,7 @@ once a fix is released.
 
 ## Supported versions
 
-Countersign is pre-1.0 (spec v0.1). Security fixes land on `main` and in the
+counter-sign is pre-1.0 (spec v0.1). Security fixes land on `main` and in the
 latest published `0.x` release. Older `0.x` releases are not separately patched.
 
 | Version | Supported |

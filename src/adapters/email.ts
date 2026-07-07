@@ -120,7 +120,7 @@ export class EmailAdapter implements Adapter {
     await this.transport.sendMail({
       from: this.cfg.from,
       to: this.cfg.to,
-      subject: `[Countersign] ${intent.action} (${intent.risk_tier})`,
+      subject: `[counter-sign] ${intent.action} (${intent.risk_tier})`,
       text:
         `${formatIntent(intent)}\n\n` +
         `Approve: ${approve}\n\nReject: ${reject}\n\n` +
@@ -223,7 +223,7 @@ export class EmailAdapter implements Adapter {
 
 function page(res: ServerResponse, status: number, title: string, bodyHtml: string): void {
   res.writeHead(status, { "content-type": "text/html; charset=utf-8" }).end(
-    `<!doctype html><html><head><meta charset="utf-8"><title>Countersign — ${escapeHtml(title)}</title>` +
+    `<!doctype html><html><head><meta charset="utf-8"><title>counter-sign — ${escapeHtml(title)}</title>` +
       `<style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:4rem auto;padding:0 1rem;line-height:1.5}` +
       `button{font-size:1.1rem;padding:.6rem 1.4rem;margin-top:1rem;cursor:pointer}</style></head>` +
       `<body><h1>${escapeHtml(title)}</h1><div>${bodyHtml}</div></body></html>`,

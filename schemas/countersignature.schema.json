@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://countersign.dev/schemas/countersignature.schema.json",
   "title": "Countersignature",
-  "description": "A signed, portable receipt of a decision over an Intent. Countersign spec v0.1.",
+  "description": "A signed, portable receipt of a decision over an Intent. counter-sign spec v0.1.",
   "type": "object",
   "required": [
     "countersign",

@@ -17,7 +17,7 @@ import type { Adapter } from "../src/adapter.js";
 import { verifyCountersignature } from "../src/core/countersignature.js";
 import { createIntent } from "../src/core/intent.js";
 import { fromB64url, generateKeypair, signBytes, utf8 } from "../src/core/keys.js";
-import type { Countersignature, Intent } from "../src/core/types.js";
+import type { Intent, Resolution } from "../src/core/types.js";
 import { DiscordAdapter } from "../src/adapters/discord.js";
 import { EmailAdapter } from "../src/adapters/email.js";
 import { SlackAdapter } from "../src/adapters/slack.js";
@@ -289,22 +289,27 @@ afterEach(() => {
 });
 
 describe.each(cases)("adapter conformance: $name ($pattern)", (c) => {
-  it("delivers, then returns a schema-valid, signature-valid Countersignature", async () => {
+  it("delivers, then returns a schema-valid, signature-valid Resolution", async () => {
     const { adapter, approve, expectedActorPrefix, teardown } = await c.make();
     try {
       const intent = makeIntent();
       await adapter.deliver(intent);
 
-      const decision = adapter.awaitDecision(intent);
+      const pending = adapter.awaitResolution(intent);
       await approve(intent);
-      const cs: Countersignature = await decision;
+      const resolution: Resolution = await pending;
 
-      // Identical shape and equally verifiable regardless of interaction pattern (spec §2).
+      expect(resolution.decision).toBe("approve");
+      expect(resolution.policy).toBe("approver");
+      expect(resolution.countersignatures).toHaveLength(1); // quorum 1
+
+      // Each receipt is identical in shape and equally verifiable regardless of
+      // interaction pattern (spec §2).
+      const cs = resolution.countersignatures[0];
       expect(validateCs(cs), JSON.stringify(validateCs.errors)).toBe(true);
       expect(verifyCountersignature(cs)).toBe(true);
       expect(cs.intent_id).toBe(intent.intent_id);
       expect(cs.decision).toBe("approve");
-      expect(cs.policy).toBe("approver");
       expect(cs.actor.startsWith(expectedActorPrefix)).toBe(true);
       expect(cs.public_key).toBe(authority.publicKey);
     } finally {
@@ -327,7 +332,7 @@ describe("webhook authentication is enforced before any payload is trusted", () 
     try {
       const intent = makeIntent();
       await adapter.deliver(intent);
-      const decision = adapter.awaitDecision(intent);
+      const decision = adapter.awaitResolution(intent);
       let settled = false;
       void decision.then(() => (settled = true), () => {});
 

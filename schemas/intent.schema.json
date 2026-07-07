@@ -62,6 +62,11 @@
       "minItems": 1,
       "items": { "type": "string", "minLength": 1 }
     },
+    "quorum": {
+      "description": "Number of distinct approvers whose approve is required (M-of-N). Optional; absent means 1.",
+      "type": "integer",
+      "minimum": 1
+    },
     "timeout": {
       "description": "Seconds after created_at at which the Default fires. Upper bound keeps timeout*1000 within a 32-bit millisecond timer.",
       "type": "integer",

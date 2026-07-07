@@ -1,0 +1,22 @@
+{
+  "countersign": "0.1",
+  "intent_id": "e37557cd-66e0-47c1-8dd8-d8e8f3223aff",
+  "agent": {
+    "id": "agent:example",
+    "public_key": "HyjiGHMCLcv1LHj1HhouHMC4V6VR-ZZwxljxh0yYXEU"
+  },
+  "action": "prod.deploy",
+  "summary": "Deploy release 2.4.0 to production (two-person rule)",
+  "risk_tier": "critical",
+  "approvers": [
+    "slack:U024BE7LH",
+    "slack:U07QX9ZLE",
+    "telegram:8675309"
+  ],
+  "quorum": 2,
+  "timeout": 600,
+  "default": "reject",
+  "callback": null,
+  "created_at": "2026-07-07T15:07:55.677Z",
+  "signature": "GYdTJfN4yGQd2k7bdHDbUTg2eBqbJZPmRTTDMv3kJhTzRDKj3VfLiQqfy7MvG1s6rk9tkVgdinmDNHwUeDImBQ"
+}

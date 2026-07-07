@@ -5,39 +5,66 @@
 import type { IncomingMessage } from "node:http";
 import { CountersignError } from "./core/errors.js";
 import { signDecision } from "./core/countersignature.js";
+import { quorumOf } from "./core/intent.js";
 import { generateKeypair } from "./core/keys.js";
-import type { Countersignature, Decision, Intent } from "./core/types.js";
+import type { Countersignature, Decision, Intent, Resolution } from "./core/types.js";
 
 /**
  * The single interface every Countersign adapter implements. Adapters are
- * intentionally dumb: deliver the Intent to where the approver lives, and
- * hand back a signed Countersignature when a decision arrives. Timeout and
- * Default resolution live in core, not here.
+ * intentionally dumb: deliver the Intent to where the approvers live, and
+ * hand back the resolved decision once enough of them have decided. Timeout
+ * and Default resolution live in core, not here.
  */
 export interface Adapter {
   /** channel name used as the actor prefix, e.g. "telegram" */
   readonly channel: string;
   /** Push the Intent to the approver's channel. */
   deliver(intent: Intent): Promise<void>;
-  /** Resolve with the signed Countersignature once the approver decides. */
-  awaitDecision(intent: Intent): Promise<Countersignature>;
+  /**
+   * Resolve once the Intent is resolved by human decision: quorum distinct
+   * approvals, or a single veto. Returns the set of receipts that produced it.
+   */
+  awaitResolution(intent: Intent): Promise<Resolution>;
   /** Release any resources (polling loops, servers). Optional. */
   close?(): Promise<void> | void;
 }
 
+/** What recording one decision did to a pending Intent. */
+export interface SettleResult {
+  /** the receipt just produced for this decision */
+  countersignature: Countersignature;
+  /** "resolved" once quorum is met or a veto lands; "pending" while more approvals are needed */
+  status: "pending" | "resolved";
+  /** distinct approvals collected so far */
+  collected: number;
+  /** distinct approvals required */
+  quorum: number;
+  /** the final decision, present when status === "resolved" */
+  decision?: Decision;
+}
+
 interface PendingEntry {
   intent: Intent;
-  resolve: (cs: Countersignature) => void;
+  quorum: number;
+  /** approve receipts keyed by distinct actor, so one person cannot fill a multi-person quorum */
+  approvals: Map<string, Countersignature>;
+  resolve: (r: Resolution) => void;
   reject: (err: Error) => void;
 }
 
-/** Book-keeping shared by all adapters: intents awaiting a human decision. */
+/** Book-keeping shared by all adapters: intents awaiting human decisions. */
 export class PendingDecisions {
   private entries = new Map<string, PendingEntry>();
 
-  wait(intent: Intent): Promise<Countersignature> {
+  wait(intent: Intent): Promise<Resolution> {
     return new Promise((resolve, reject) => {
-      this.entries.set(intent.intent_id, { intent, resolve, reject });
+      this.entries.set(intent.intent_id, {
+        intent,
+        quorum: quorumOf(intent),
+        approvals: new Map(),
+        resolve,
+        reject,
+      });
     });
   }
 
@@ -54,17 +81,32 @@ export class PendingDecisions {
   }
 
   /**
-   * Record a decision: sign the Countersignature with the adapter's
-   * authority key and resolve the waiting promise. Returns null if the
-   * intent is unknown or already settled (decisions are single-shot).
+   * Record one decision toward resolving an Intent. A `reject` vetoes
+   * immediately and finally. An `approve` counts once per distinct `actor`
+   * and resolves the Intent when `quorum` distinct actors have approved.
+   * Returns null if the intent is unknown or already resolved (resolution is
+   * single-shot); otherwise a SettleResult telling the caller whether the
+   * Intent is now resolved or still awaiting more approvals.
    */
-  settle(intentId: string, decision: Decision, actor: string, authoritySecret: string): Countersignature | null {
+  settle(intentId: string, decision: Decision, actor: string, authoritySecret: string): SettleResult | null {
     const entry = this.entries.get(intentId);
     if (!entry) return null;
-    this.entries.delete(intentId);
     const cs = signDecision(entry.intent, decision, actor, authoritySecret);
-    entry.resolve(cs);
-    return cs;
+
+    if (decision === "reject") {
+      this.entries.delete(intentId);
+      entry.resolve({ decision: "reject", policy: "approver", countersignatures: [cs] });
+      return { countersignature: cs, status: "resolved", collected: entry.approvals.size, quorum: entry.quorum, decision: "reject" };
+    }
+
+    // Dedupe approvals by actor so one person cannot fill a multi-person quorum.
+    entry.approvals.set(actor, cs);
+    if (entry.approvals.size >= entry.quorum) {
+      this.entries.delete(intentId);
+      entry.resolve({ decision: "approve", policy: "approver", countersignatures: [...entry.approvals.values()] });
+      return { countersignature: cs, status: "resolved", collected: entry.approvals.size, quorum: entry.quorum, decision: "approve" };
+    }
+    return { countersignature: cs, status: "pending", collected: entry.approvals.size, quorum: entry.quorum };
   }
 
   abortAll(err: Error): void {
@@ -114,12 +156,14 @@ export function decisionPayload(intent: Intent, decision: Decision): string {
 
 /** Human-readable rendering of an Intent for chat messages and emails. */
 export function formatIntent(intent: Intent): string {
+  const quorum = quorumOf(intent);
   return [
     "Countersign approval request",
     `Action:  ${intent.action}`,
     `Summary: ${intent.summary}`,
     `Risk:    ${intent.risk_tier}`,
     `Agent:   ${intent.agent.id}`,
+    ...(quorum > 1 ? [`Requires: ${quorum} distinct approvals`] : []),
     `If nobody answers within ${intent.timeout}s, the default is: ${intent.default}.`,
     `Intent:  ${intent.intent_id}`,
   ].join("\n");

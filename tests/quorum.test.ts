@@ -1,0 +1,224 @@
+// Copyright 2026 Haridarman Kumaresan
+// SPDX-License-Identifier: Apache-2.0
+// M-of-N approval quorum: distinct-actor accumulation, veto, dedup, defaults,
+// backward compatibility, and end-to-end through the shim.
+
+import { describe, expect, it, vi } from "vitest";
+import { PendingDecisions, type Adapter, type SettleResult } from "../src/adapter.js";
+import { signDecision, verifyCountersignature } from "../src/core/countersignature.js";
+import { awaitWithDefault } from "../src/core/defaults.js";
+import { CountersignError, IntentRejectedError } from "../src/core/errors.js";
+import { createIntent, quorumOf } from "../src/core/intent.js";
+import { generateKeypair } from "../src/core/keys.js";
+import type { Intent, IntentFields, Resolution } from "../src/core/types.js";
+import { EmailAdapter } from "../src/adapters/email.js";
+import { wrapAction } from "../src/shim.js";
+
+const agent = { id: "agent:test", keypair: generateKeypair() };
+const authority = generateKeypair();
+
+function intent(quorum: number, overrides: Partial<IntentFields> = {}): Intent {
+  return createIntent(
+    {
+      action: "prod.deploy",
+      summary: "Deploy 2.4.0",
+      risk_tier: "critical",
+      approvers: ["m:alice", "m:bob", "m:carol"],
+      quorum,
+      timeout: 300,
+      default: "reject",
+      ...overrides,
+    },
+    agent,
+  );
+}
+
+describe("quorumOf", () => {
+  it("defaults to 1 when the field is absent or invalid", () => {
+    const i = intent(1);
+    expect(quorumOf(i)).toBe(1);
+    expect(quorumOf({ ...i, quorum: undefined as unknown as number })).toBe(1);
+    expect(quorumOf({ ...i, quorum: 0 })).toBe(1);
+    expect(quorumOf({ ...i, quorum: 3 })).toBe(3);
+  });
+
+  it("createIntent rejects a quorum below 1 and includes it in the signed envelope", () => {
+    expect(() => intent(0)).toThrow();
+    expect(intent(2).quorum).toBe(2);
+  });
+});
+
+describe("PendingDecisions accumulates a distinct-actor quorum", () => {
+  it("resolves approve only after quorum distinct actors approve", async () => {
+    const pd = new PendingDecisions();
+    const i = intent(2);
+    const p = pd.wait(i);
+
+    const r1 = pd.settle(i.intent_id, "approve", "m:alice", authority.secretKey)!;
+    expect(r1.status).toBe("pending");
+    expect(r1.collected).toBe(1);
+    expect(r1.quorum).toBe(2);
+
+    const r2 = pd.settle(i.intent_id, "approve", "m:bob", authority.secretKey)!;
+    expect(r2.status).toBe("resolved");
+    expect(r2.decision).toBe("approve");
+
+    const resolution = await p;
+    expect(resolution.decision).toBe("approve");
+    expect(resolution.policy).toBe("approver");
+    expect(resolution.countersignatures).toHaveLength(2);
+    expect(new Set(resolution.countersignatures.map((c) => c.actor)).size).toBe(2);
+    for (const cs of resolution.countersignatures) expect(verifyCountersignature(cs)).toBe(true);
+  });
+
+  it("does NOT let one actor fill a two-person quorum by pressing twice", async () => {
+    const pd = new PendingDecisions();
+    const i = intent(2);
+    const p = pd.wait(i);
+    let resolved = false;
+    void p.then(() => (resolved = true));
+
+    expect(pd.settle(i.intent_id, "approve", "m:alice", authority.secretKey)!.collected).toBe(1);
+    const again = pd.settle(i.intent_id, "approve", "m:alice", authority.secretKey)!;
+    expect(again.status).toBe("pending");
+    expect(again.collected).toBe(1); // still one distinct approver
+    await new Promise((r) => setTimeout(r, 10));
+    expect(resolved).toBe(false);
+  });
+
+  it("a reject vetoes immediately even after approvals were collected", async () => {
+    const pd = new PendingDecisions();
+    const i = intent(3);
+    const p = pd.wait(i);
+
+    pd.settle(i.intent_id, "approve", "m:alice", authority.secretKey);
+    const veto = pd.settle(i.intent_id, "reject", "m:bob", authority.secretKey)!;
+    expect(veto.status).toBe("resolved");
+    expect(veto.decision).toBe("reject");
+
+    const resolution = await p;
+    expect(resolution.decision).toBe("reject");
+    expect(resolution.countersignatures).toHaveLength(1);
+    expect(resolution.countersignatures[0].actor).toBe("m:bob");
+
+    // Resolution is single-shot: later decisions are ignored.
+    expect(pd.settle(i.intent_id, "approve", "m:carol", authority.secretKey)).toBeNull();
+  });
+});
+
+/** Adapter backed by PendingDecisions; the test drives button presses. */
+class MockQuorumAdapter implements Adapter {
+  readonly channel = "mock";
+  readonly pending = new PendingDecisions();
+  constructor(private readonly authorityKey: string) {}
+  async deliver(): Promise<void> {}
+  awaitResolution(i: Intent): Promise<Resolution> {
+    return this.pending.wait(i);
+  }
+  press(intentId: string, decision: "approve" | "reject", actor: string): SettleResult | null {
+    return this.pending.settle(intentId, decision, actor, this.authorityKey);
+  }
+}
+
+async function untilPending(adapter: MockQuorumAdapter, intentId: string): Promise<void> {
+  for (let i = 0; i < 50 && !adapter.pending.has(intentId); i++) await new Promise((r) => setTimeout(r, 0));
+}
+
+describe("wrapAction end-to-end under quorum", () => {
+  const fields: IntentFields = {
+    action: "prod.deploy",
+    summary: "Deploy 2.4.0",
+    risk_tier: "critical",
+    approvers: ["m:alice", "m:bob"],
+    quorum: 2,
+    timeout: 300,
+    default: "reject",
+  };
+
+  it("runs the action only after two distinct approvals", async () => {
+    const adapter = new MockQuorumAdapter(authority.secretKey);
+    const fn = vi.fn(async () => "deployed");
+    let intentId = "";
+    let resolution: Resolution | undefined;
+    const guarded = wrapAction(fn, fields, adapter, {
+      agent,
+      authorityKey: authority.secretKey,
+      onIntent: (i) => (intentId = i.intent_id),
+      onResolution: (r) => (resolution = r),
+    });
+
+    const run = guarded();
+    await untilPending(adapter, intentId);
+
+    adapter.press(intentId, "approve", "mock:alice");
+    expect(fn).not.toHaveBeenCalled(); // one approval is not enough
+    adapter.press(intentId, "approve", "mock:bob");
+
+    await expect(run).resolves.toBe("deployed");
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(resolution?.decision).toBe("approve");
+    expect(resolution?.countersignatures).toHaveLength(2);
+  });
+
+  it("blocks the action when a single approver vetoes", async () => {
+    const adapter = new MockQuorumAdapter(authority.secretKey);
+    const fn = vi.fn(async () => "deployed");
+    let intentId = "";
+    const guarded = wrapAction(fn, fields, adapter, {
+      agent,
+      authorityKey: authority.secretKey,
+      onIntent: (i) => (intentId = i.intent_id),
+    });
+
+    const run = guarded().catch((e) => e);
+    await untilPending(adapter, intentId);
+    adapter.press(intentId, "approve", "mock:alice");
+    adapter.press(intentId, "reject", "mock:bob");
+
+    const err = await run;
+    expect(err).toBeInstanceOf(IntentRejectedError);
+    expect(err.resolution.decision).toBe("reject");
+    expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+describe("quorum security", () => {
+  it("awaitWithDefault rejects an approve quorum if ANY receipt is foreign-signed", async () => {
+    const attacker = generateKeypair();
+    const i = intent(2);
+    // Two distinct approvers, but one receipt is signed by an untrusted key.
+    const mixed: Resolution = {
+      decision: "approve",
+      policy: "approver",
+      countersignatures: [
+        signDecision(i, "approve", "m:alice", authority.secretKey),
+        signDecision(i, "approve", "m:bob", attacker.secretKey),
+      ],
+    };
+    await expect(awaitWithDefault(i, Promise.resolve(mixed), authority.secretKey)).rejects.toThrow();
+  });
+
+  it("the email adapter refuses quorum > 1 at delivery (bearer links cannot represent distinct approvers)", async () => {
+    const adapter = new EmailAdapter({
+      transport: { sendMail: async () => {}, close: () => {} } as never,
+      from: "a@x", to: "b@x", callbackBaseUrl: "http://x", authorityKey: authority.secretKey,
+    });
+    await expect(adapter.deliver(intent(2))).rejects.toThrow(CountersignError);
+    // quorum 1 is fine.
+    await expect(adapter.deliver(intent(1))).resolves.toBeUndefined();
+    adapter.close();
+  });
+});
+
+describe("backward compatibility", () => {
+  it("an intent with no quorum field behaves as single-approver", async () => {
+    const pd = new PendingDecisions();
+    const base = intent(1);
+    const legacy = { ...base } as Record<string, unknown>;
+    delete legacy.quorum; // simulate a pre-quorum Intent
+    const p = pd.wait(legacy as unknown as Intent);
+    const r = pd.settle(base.intent_id, "approve", "m:alice", authority.secretKey)!;
+    expect(r.status).toBe("resolved");
+    expect((await p).countersignatures).toHaveLength(1);
+  });
+});

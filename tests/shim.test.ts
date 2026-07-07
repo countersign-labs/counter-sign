@@ -6,12 +6,12 @@ import type { Adapter } from "../src/adapter.js";
 import { signDecision } from "../src/core/countersignature.js";
 import { IntentRejectedError } from "../src/core/errors.js";
 import { generateKeypair } from "../src/core/keys.js";
-import type { Countersignature, Decision, Intent } from "../src/core/types.js";
+import type { Countersignature, Decision, Intent, Resolution } from "../src/core/types.js";
 import { wrapAction } from "../src/shim.js";
 
 const authority = generateKeypair();
 
-/** Adapter that instantly answers with a fixed decision. */
+/** Adapter that instantly answers with a fixed single-approver decision. */
 function instantAdapter(decision: Decision): Adapter & { delivered: Intent[] } {
   const delivered: Intent[] = [];
   return {
@@ -20,8 +20,12 @@ function instantAdapter(decision: Decision): Adapter & { delivered: Intent[] } {
     async deliver(intent) {
       delivered.push(intent);
     },
-    awaitDecision(intent) {
-      return Promise.resolve(signDecision(intent, decision, "mock:tester", authority.secretKey));
+    awaitResolution(intent): Promise<Resolution> {
+      return Promise.resolve({
+        decision,
+        policy: "approver",
+        countersignatures: [signDecision(intent, decision, "mock:tester", authority.secretKey)],
+      });
     },
   };
 }
@@ -85,7 +89,7 @@ describe("wrapAction reject path", () => {
       const silent: Adapter = {
         channel: "mock",
         async deliver() {},
-        awaitDecision: () => new Promise<Countersignature>(() => {}),
+        awaitResolution: () => new Promise<Resolution>(() => {}),
       };
       const fn = vi.fn(async () => "must not happen");
       const guarded = wrapAction(fn, { ...fields, timeout: 30 }, silent, { authorityKey: authority.secretKey });

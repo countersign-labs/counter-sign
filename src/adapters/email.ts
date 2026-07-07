@@ -15,8 +15,9 @@ import {
 import { canonicalize } from "../core/canonical.js";
 import { deadline } from "../core/defaults.js";
 import { CountersignError } from "../core/errors.js";
+import { quorumOf } from "../core/intent.js";
 import { fromB64url, publicKeyFromSecret, signContext, toB64url, verifyContext } from "../core/keys.js";
-import { LINK_CONTEXT, type Countersignature, type Decision, type Intent } from "../core/types.js";
+import { LINK_CONTEXT, type Decision, type Intent, type Resolution } from "../core/types.js";
 
 export interface EmailConfig {
   smtpUrl: string;
@@ -104,6 +105,15 @@ export class EmailAdapter implements Adapter {
   }
 
   async deliver(intent: Intent): Promise<void> {
+    // Bearer links go to one recipient, so distinct-approver quorum cannot be
+    // satisfied — and MUST NOT be faked — over email. Refuse quorum > 1 loudly
+    // rather than silently deadlock to the timeout Default.
+    if (quorumOf(intent) > 1) {
+      throw new CountersignError(
+        `email adapter supports a single approver (quorum 1); intent ${intent.intent_id} requires ${quorumOf(intent)}. ` +
+          `Use a chat adapter where distinct approvers can each respond.`,
+      );
+    }
     const approve = this.linkFor(intent, "approve");
     const reject = this.linkFor(intent, "reject");
     const expires = new Date(deadline(intent)).toISOString();
@@ -123,7 +133,7 @@ export class EmailAdapter implements Adapter {
     });
   }
 
-  awaitDecision(intent: Intent): Promise<Countersignature> {
+  awaitResolution(intent: Intent): Promise<Resolution> {
     return this.pending.wait(intent);
   }
 

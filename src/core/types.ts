@@ -31,6 +31,8 @@ export interface Intent {
   summary: string;
   risk_tier: RiskTier;
   approvers: string[];
+  /** number of distinct approvers whose approve is required (M-of-N); >= 1 */
+  quorum: number;
   /** seconds until the Default fires, counted from created_at */
   timeout: number;
   /** what silence means: the decision that fires at the deadline */
@@ -63,7 +65,22 @@ export interface IntentFields {
   summary: string;
   risk_tier: RiskTier;
   approvers: string[];
+  /** distinct approvals required (M-of-N); optional, defaults to 1. */
+  quorum?: number;
   timeout: number;
   default: Decision;
   callback?: string | null;
+}
+
+/**
+ * The outcome of resolving an Intent: the final decision and the set of
+ * receipts that produced it. For an approval under `quorum: N`, that is the
+ * N distinct `approve` Countersignatures; for a veto, the single `reject`;
+ * for a timeout, the single Default receipt. Every receipt is independently
+ * verifiable and bound to the same `intent_id`.
+ */
+export interface Resolution {
+  decision: Decision;
+  policy: Policy;
+  countersignatures: Countersignature[];
 }

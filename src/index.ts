@@ -5,6 +5,7 @@
 export * from "./core/index.js";
 export {
   type Adapter,
+  type SettleResult,
   PendingDecisions,
   requireEnv,
   authorityKeyFromEnv,

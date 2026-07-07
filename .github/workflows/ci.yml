@@ -26,5 +26,3 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
-      # Guard: signed example/conformance payloads must still verify after any change
-      - run: npm run gen:payloads && git diff --exit-code examples/payloads

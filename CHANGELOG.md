@@ -7,6 +7,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-07-09
+
 ### Added
 - **Hash-chained ReceiptLog** — each log entry now commits to a SHA-256 of the
   entry before it, so the stored history is tamper-evident for *completeness*,
@@ -87,6 +89,7 @@ First public draft of the protocol and reference implementation.
 - Code: Apache-2.0. Specification text: CC BY 4.0 (vendored as
   `LICENSE-CC-BY-4.0.txt`).
 
-[Unreleased]: https://github.com/countersign-labs/counter-sign/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/countersign-labs/counter-sign/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/countersign-labs/counter-sign/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/countersign-labs/counter-sign/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/countersign-labs/counter-sign/releases/tag/v0.1.0

@@ -7,6 +7,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 
 ## [Unreleased]
 
+### Added
+- **Hash-chained ReceiptLog** — each log entry now commits to a SHA-256 of the
+  entry before it, so the stored history is tamper-evident for *completeness*,
+  not just per-receipt authenticity: an edit, reorder, insertion, or mid-stream
+  deletion breaks the chain. `verifyChain()` walks the links and names the first
+  break; `verifyAll()` folds the chain result into `ok` (true only when every
+  receipt is genuine **and** the chain is intact).
+- **`head()` / `expectedHead`** — checkpoint the chain head and anchor it
+  externally to detect tail truncation (which a forward chain alone cannot).
+- New types: `ChainEntry`, `ChainHead`, `ChainReport`; `ReceiptLogReport` gains a
+  `chain` field.
+
+### Changed
+- On-disk log format is now a chained envelope (`{ seq, prev, receipt }`) per
+  line instead of a bare receipt. Reading a pre-chain (v0.1.1) log still works;
+  `verifyChain()` flags such entries as `unchained-entry`. No change to the
+  protocol or the Countersignature wire format — receipts inside are byte-for-byte
+  the same portable artifact.
+
 ## [0.1.1] — 2026-07-09
 
 ### Added

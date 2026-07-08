@@ -76,7 +76,10 @@ export async function runDemo(adapter: Adapter, fields: IntentFields): Promise<v
 
   if (receiptLog) {
     const report = await receiptLog.verifyAll();
-    console.log(`\nReceipt log ${receiptLog.filePath}: ${report.total} receipt(s), all verify: ${report.ok}.`);
+    console.log(
+      `\nReceipt log ${receiptLog.filePath}: ${report.total} receipt(s), ` +
+        `chain intact: ${report.chain.intact}, every receipt verifies: ${report.ok}.`,
+    );
   }
 }
 

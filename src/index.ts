@@ -21,4 +21,7 @@ export {
   type ReceiptLogReport,
   type ReceiptFault,
   type VerifyAllOptions,
+  type ChainEntry,
+  type ChainHead,
+  type ChainReport,
 } from "./receipt-log.js";

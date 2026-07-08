@@ -115,16 +115,31 @@ const receiptLog = new ReceiptLog("./receipts.jsonl");
 const refund = wrapAction(issueRefund, fields, adapter, { receiptLog });
 ```
 
-The file *is* the audit trail: each line is an independently verifiable
-Countersignature, so anyone can replay and re-check the whole history offline —
-no trust in the process that wrote it (the integrity is in the signatures, not
-the storage). Recording completes *before* the guarded action runs, so an
-approval you cannot remember is one the runtime declines to act on.
+The file *is* the audit trail, and it proves two distinct things offline, with
+no trust in the process that wrote it:
+
+- **Authenticity** — each line carries an independently verifiable
+  Countersignature (the integrity is in the signatures, not the storage).
+- **Completeness** — the entries are **hash-chained**: every line commits to a
+  hash of the one before it, so an edit, reorder, insertion, or mid-stream
+  deletion breaks the chain and is detectable. Recording completes *before* the
+  guarded action runs, so an approval you cannot remember is one the runtime
+  declines to act on.
 
 ```ts
 const report = await receiptLog.verifyAll({ trustedKeys: [OUR_AUTHORITY_PUBLIC_KEY] });
-// { total, valid, ok, faults: [{ index, intent_id, actor, reason }] }
+// { total, valid, ok, faults: [...], chain: { intact, brokenAt?, reason? } }
+// ok === true  ⇢  every receipt is genuine AND nothing was altered or removed.
 const perIntent = await receiptLog.history(); // Map<intent_id, Countersignature[]>
+```
+
+A forward chain cannot, by itself, tell that the *newest* entries were truncated
+— what remains still links cleanly. Checkpoint the head somewhere the operator
+cannot silently rewrite, then anchor against it to catch truncation too:
+
+```ts
+const head = await receiptLog.head();               // { length, hash } — store this out of band
+await receiptLog.verifyChain(head);                 // later: fails if the log was shortened below it
 ```
 
 `ReceiptLog` is a file-backed implementation of the `ReceiptSink` interface;

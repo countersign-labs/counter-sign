@@ -15,3 +15,10 @@ export {
   readBody,
 } from "./adapter.js";
 export { wrapAction, type WrapOptions } from "./shim.js";
+export {
+  ReceiptLog,
+  type ReceiptSink,
+  type ReceiptLogReport,
+  type ReceiptFault,
+  type VerifyAllOptions,
+} from "./receipt-log.js";

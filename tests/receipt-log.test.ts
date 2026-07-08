@@ -1,9 +1,9 @@
 // Copyright 2026 Haridarman Kumaresan
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Adapter } from "../src/adapter.js";
 import { signDecision } from "../src/core/countersignature.js";
@@ -150,6 +150,107 @@ describe("concurrent writes do not interleave", () => {
     const stored = await log.read(); // read() would throw if any line were torn
     expect(stored).toHaveLength(50);
     expect(new Set(stored.map((c) => c.actor)).size).toBe(50);
+    // Serialized writes must still form one unbroken chain (seq 0..49).
+    expect(await log.verifyChain()).toEqual({ intact: true, length: 50 });
+  });
+});
+
+describe("hash chain — completeness", () => {
+  async function rawLines(): Promise<string[]> {
+    return (await readFile(log.filePath, "utf8")).split("\n").filter(Boolean);
+  }
+  async function writeLines(lines: string[]): Promise<void> {
+    await writeFile(log.filePath, lines.map((l) => l + "\n").join(""));
+  }
+
+  it("verifyChain is intact for an untampered log", async () => {
+    const i = intent();
+    for (const a of ["local:a", "local:b", "local:c"]) await log.append(signDecision(i, "approve", a, authority));
+    expect(await log.verifyChain()).toEqual({ intact: true, length: 3 });
+  });
+
+  it("detects a deleted middle entry", async () => {
+    const i = intent();
+    for (const a of ["local:a", "local:b", "local:c"]) await log.append(signDecision(i, "approve", a, authority));
+    const lines = await rawLines();
+    await writeLines([lines[0], lines[2]]); // drop the middle one
+    const c = await log.verifyChain();
+    expect(c.intact).toBe(false);
+    expect(c.brokenAt).toBe(1);
+    expect(["bad-seq", "broken-link"]).toContain(c.reason);
+  });
+
+  it("detects reordered entries", async () => {
+    const i = intent();
+    for (const a of ["local:a", "local:b"]) await log.append(signDecision(i, "approve", a, authority));
+    const [l0, l1] = await rawLines();
+    await writeLines([l1, l0]); // swap
+    expect((await log.verifyChain()).intact).toBe(false);
+  });
+
+  it("detects an edited receipt in a non-final entry via the next link", async () => {
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority));
+    await log.append(signDecision(i, "approve", "local:b", authority));
+    const lines = await rawLines();
+    const entry0 = JSON.parse(lines[0]);
+    entry0.receipt.actor = "local:evil"; // tamper the first entry's receipt, keep its prev
+    lines[0] = JSON.stringify(entry0);
+    await writeLines(lines);
+    const c = await log.verifyChain();
+    expect(c).toMatchObject({ intact: false, reason: "broken-link", brokenAt: 1 });
+  });
+
+  it("detects an inserted entry", async () => {
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority));
+    await log.append(signDecision(i, "approve", "local:b", authority));
+    const [l0, l1] = await rawLines();
+    await writeLines([l0, l0, l1]); // duplicate line 0 in
+    expect((await log.verifyChain()).intact).toBe(false);
+  });
+
+  it("continues the chain across a simulated process restart (new instance, same file)", async () => {
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority));
+    await log.append(signDecision(i, "approve", "local:b", authority));
+    const reopened = new ReceiptLog(log.filePath); // fresh process → fresh instance
+    await reopened.append(signDecision(i, "approve", "local:c", authority));
+    expect(await reopened.verifyChain()).toEqual({ intact: true, length: 3 });
+    expect((await reopened.read()).map((r) => r.actor)).toEqual(["local:a", "local:b", "local:c"]);
+  });
+
+  it("head() anchors detection of tail truncation", async () => {
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority));
+    await log.append(signDecision(i, "approve", "local:b", authority));
+    const anchored = await log.head(); // { length: 2, hash }
+    const [l0] = await rawLines();
+    await writeLines([l0]); // lop off the newest entry
+    // A forward chain alone still looks intact (one clean entry)...
+    expect((await log.verifyChain()).intact).toBe(true);
+    // ...but against the anchored head, truncation is caught.
+    expect(await log.verifyChain(anchored)).toMatchObject({ intact: false, reason: "truncated" });
+  });
+
+  it("verifyAll folds completeness into ok (authentic receipts, broken chain)", async () => {
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority));
+    await log.append(signDecision(i, "approve", "local:b", authority));
+    const [l0, l1] = await rawLines();
+    await writeLines([l1, l0]); // reorder: receipts stay genuine, chain breaks
+    const r = await log.verifyAll();
+    expect(r.faults).toEqual([]); // every receipt is a genuine signature
+    expect(r.chain.intact).toBe(false); // but the sequence was tampered
+    expect(r.ok).toBe(false);
+  });
+
+  it("reads a legacy unchained log but flags it in verifyChain", async () => {
+    const i = intent();
+    await mkdir(dirname(log.filePath), { recursive: true }); // no prior append created it
+    await writeFile(log.filePath, JSON.stringify(signDecision(i, "approve", "local:a", authority)) + "\n");
+    expect(await log.read()).toHaveLength(1); // bare v0.1.1 line still readable
+    expect(await log.verifyChain()).toMatchObject({ intact: false, brokenAt: 0, reason: "unchained-entry" });
   });
 });
 

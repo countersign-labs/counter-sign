@@ -5,6 +5,20 @@ All notable changes to counter-sign are documented here. The format follows
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reaches
 1.0. Until then, `0.x` minor bumps may include breaking changes.
 
+## [Unreleased]
+
+### Added
+- **`ReceiptLog`** — an opt-in, append-only, tamper-evident approval history
+  stored where the runtime is installed. Each line is the canonical JSON of one
+  Countersignature, so the file is a portable audit trail: replay and re-verify
+  every decision offline with `read()`, `history()`, and `verifyAll()`. Pass one
+  to `wrapAction({ receiptLog })` and every resolution (approval, veto, or timeout
+  Default) is recorded before the guarded action runs (fail-closed audit).
+- **`ReceiptSink`** interface — back the history with a file (`ReceiptLog`),
+  SQLite, Postgres, or a log pipeline without changing call sites.
+- Reference implementation stays stateless unless a sink is supplied; no change
+  to the protocol or wire format.
+
 ## [0.1.0] — 2026-07-08
 
 First public draft of the protocol and reference implementation.
@@ -52,4 +66,5 @@ First public draft of the protocol and reference implementation.
 - Code: Apache-2.0. Specification text: CC BY 4.0 (vendored as
   `LICENSE-CC-BY-4.0.txt`).
 
+[Unreleased]: https://github.com/countersign-labs/counter-sign/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/countersign-labs/counter-sign/releases/tag/v0.1.0

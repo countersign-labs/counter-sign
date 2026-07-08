@@ -101,6 +101,36 @@ decision must share that key (set `COUNTERSIGN_AUTHORITY_KEY`).
 
 CLAIRE by Agentsstack Pte. Ltd. is the first reference deployment.
 
+## Approval history
+
+counter-sign never persists on its own — it hands you signed receipts and lets
+you decide where they live. Pass a `ReceiptLog` (opt-in) and every resolution —
+approval, veto, or timeout Default — is durably recorded where the runtime is
+installed, one canonical JSON line per receipt:
+
+```ts
+import { wrapAction, ReceiptLog } from "counter-sign";
+
+const receiptLog = new ReceiptLog("./receipts.jsonl");
+const refund = wrapAction(issueRefund, fields, adapter, { receiptLog });
+```
+
+The file *is* the audit trail: each line is an independently verifiable
+Countersignature, so anyone can replay and re-check the whole history offline —
+no trust in the process that wrote it (the integrity is in the signatures, not
+the storage). Recording completes *before* the guarded action runs, so an
+approval you cannot remember is one the runtime declines to act on.
+
+```ts
+const report = await receiptLog.verifyAll({ trustedKeys: [OUR_AUTHORITY_PUBLIC_KEY] });
+// { total, valid, ok, faults: [{ index, intent_id, actor, reason }] }
+const perIntent = await receiptLog.history(); // Map<intent_id, Countersignature[]>
+```
+
+`ReceiptLog` is a file-backed implementation of the `ReceiptSink` interface;
+put SQLite, Postgres, or a log pipeline behind that interface to store the
+history wherever your deployment already keeps its records.
+
 ## Compliance and evidence
 
 counter-sign gives regulated teams a machine-enforceable, auditable

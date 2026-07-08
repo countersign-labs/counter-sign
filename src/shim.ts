@@ -8,6 +8,7 @@ import { IntentRejectedError } from "./core/errors.js";
 import { createIntent, type AgentIdentity } from "./core/intent.js";
 import { generateKeypair } from "./core/keys.js";
 import type { Countersignature, Intent, IntentFields, Resolution } from "./core/types.js";
+import type { ReceiptSink } from "./receipt-log.js";
 
 export interface WrapOptions {
   /** Signing identity of the requesting agent. Defaults to a per-process keypair. */
@@ -20,6 +21,14 @@ export interface WrapOptions {
   onDecision?: (cs: Countersignature) => void;
   /** Observe the full Resolution — all contributing receipts — once produced. */
   onResolution?: (resolution: Resolution) => void;
+  /**
+   * Durably record every resolution's receipts where the runtime is installed —
+   * pass a `ReceiptLog` (or any `ReceiptSink`) to give this install a persistent
+   * approval history. Recording happens for approvals, vetoes, and timeout
+   * Defaults alike, and completes *before* the guarded action runs: if the sink
+   * throws, the action does not run (fail-closed audit). Omit it to stay stateless.
+   */
+  receiptLog?: ReceiptSink;
 }
 
 let processAgent: AgentIdentity | undefined;
@@ -62,6 +71,9 @@ export function wrapAction<A extends unknown[], R>(
     const decisive = resolution.countersignatures[resolution.countersignatures.length - 1];
     opts.onResolution?.(resolution);
     if (decisive) opts.onDecision?.(decisive);
+    // Persist the receipts before acting: an approval we cannot remember is one
+    // we decline to act on (fail-closed audit). Rejections are recorded too.
+    if (opts.receiptLog) await opts.receiptLog.record(resolution);
     if (intent.callback) void postCallback(intent.callback, resolution);
 
     if (resolution.decision !== "approve") throw new IntentRejectedError(resolution, intent);

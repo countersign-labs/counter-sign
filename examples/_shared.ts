@@ -9,6 +9,7 @@ import { IntentRejectedError } from "../src/core/errors.js";
 import { generateKeypair } from "../src/core/keys.js";
 import type { Countersignature, IntentFields } from "../src/core/types.js";
 import { verifyIntent } from "../src/core/intent.js";
+import { ReceiptLog } from "../src/receipt-log.js";
 import { wrapAction } from "../src/shim.js";
 
 /** The pretend tool call being guarded in every demo. */
@@ -32,8 +33,13 @@ export async function runDemo(adapter: Adapter, fields: IntentFields): Promise<v
   const agent = { id: process.env.COUNTERSIGN_AGENT_ID ?? "agent:demo", keypair: generateKeypair() };
   let countersignature: Countersignature | undefined;
 
+  // Set COUNTERSIGN_RECEIPT_LOG to a file path to give this run a persistent,
+  // re-verifiable approval history where it is installed.
+  const receiptLog = process.env.COUNTERSIGN_RECEIPT_LOG ? new ReceiptLog(process.env.COUNTERSIGN_RECEIPT_LOG) : undefined;
+
   const refund = wrapAction(issueRefund, fields, adapter, {
     agent,
+    receiptLog,
     onIntent: (intent) => {
       console.log(`\n→ Intent ${intent.intent_id} signed (verifies: ${verifyIntent(intent)}) and delivered via ${adapter.channel}.`);
       console.log(`  Waiting up to ${intent.timeout}s; on silence the default is "${intent.default}".`);
@@ -67,6 +73,11 @@ export async function runDemo(adapter: Adapter, fields: IntentFields): Promise<v
   const valid = verifyCountersignature(countersignature);
   console.log(`\nSignature verifies: ${valid}`);
   if (!valid) process.exitCode = 1;
+
+  if (receiptLog) {
+    const report = await receiptLog.verifyAll();
+    console.log(`\nReceipt log ${receiptLog.filePath}: ${report.total} receipt(s), all verify: ${report.ok}.`);
+  }
 }
 
 /**

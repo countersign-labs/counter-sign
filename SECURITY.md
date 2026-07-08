@@ -8,7 +8,7 @@ reports seriously.
 
 **Please do not open a public issue for security problems.**
 
-Report privately through GitHub's **[Report a vulnerability](https://github.com/countersign-labs/countersign/security/advisories/new)**
+Report privately through GitHub's **[Report a vulnerability](https://github.com/countersign-labs/counter-sign/security/advisories/new)**
 (the repository **Security** tab → *Advisories* → *Report a vulnerability*). This
 opens a private advisory visible only to you and the maintainers.
 

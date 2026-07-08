@@ -52,4 +52,4 @@ First public draft of the protocol and reference implementation.
 - Code: Apache-2.0. Specification text: CC BY 4.0 (vendored as
   `LICENSE-CC-BY-4.0.txt`).
 
-[0.1.0]: https://github.com/countersign-labs/countersign/releases/tag/v0.1.0
+[0.1.0]: https://github.com/countersign-labs/counter-sign/releases/tag/v0.1.0

@@ -4,6 +4,8 @@
 
 **MCP gave agents tools. A2A gave agents colleagues. counter-sign gives agents a boss.**
 
+**[countersignlabs.com](https://countersignlabs.com)** · [Spec](spec/countersign-spec.md) · [Releases](https://github.com/countersign-labs/counter-sign/releases)
+
 [![counter-sign in motion — an autonomous agent's $42,000 action is gated, a human taps Approve, and a signed portable receipt is produced.](assets/countersign-brag.gif)](assets/countersign-brag.mp4)
 
 counter-sign is an open protocol for agent-to-human authorization: an agent

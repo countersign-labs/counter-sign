@@ -55,10 +55,11 @@ npm run demo:email                   # full email flow, offline, no accounts
 
 ## Adapters
 
-All five adapters implement one interface — `deliver(intent)` plus a
-decision callback returning a `Countersignature` — and are configured via
-env vars only (see [.env.example](.env.example) and
-[adapters/README.md](adapters/README.md) for setup):
+All six adapters implement one interface — `deliver(intent)` plus a
+decision callback returning a `Countersignature`. The five network channels
+are configured via env vars (see [.env.example](.env.example) and
+[adapters/README.md](adapters/README.md) for setup); the local approver needs
+none:
 
 | Channel  | Setup effort | Interaction pattern |
 | -------- | ------------ | ------------------- |

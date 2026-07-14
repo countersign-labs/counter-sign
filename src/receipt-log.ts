@@ -62,7 +62,7 @@ export interface ReceiptFault {
   index: number;
   intent_id: string;
   actor: string;
-  reason: "invalid-signature" | "untrusted-key" | "unknown-intent";
+  reason: "invalid-signature" | "untrusted-key" | "unknown-intent" | "malformed";
 }
 
 /** The result of re-verifying an entire ReceiptLog. */
@@ -111,8 +111,8 @@ function isChainEntry(o: unknown): o is ChainEntry {
     o !== null &&
     typeof (o as ChainEntry).seq === "number" &&
     typeof (o as ChainEntry).prev === "string" &&
-    typeof (o as ChainEntry).receipt === "object" &&
-    (o as ChainEntry).receipt !== null
+    // receipt must be a Countersignature-shaped object, not an array or garbage
+    isBareReceipt((o as ChainEntry).receipt)
   );
 }
 
@@ -261,7 +261,15 @@ export class ReceiptLog implements ReceiptSink {
     const chain = walkChain(lines, opts.expectedHead);
     const faults: ReceiptFault[] = [];
     lines.forEach((line, index) => {
-      const cs = extractReceipt(line.obj);
+      let cs: Countersignature;
+      try {
+        cs = extractReceipt(line.obj);
+      } catch {
+        // A line that is neither a chained entry nor a receipt is a fault to
+        // REPORT, not an exception that aborts the whole audit.
+        faults.push({ index, intent_id: "", actor: "", reason: "malformed" });
+        return;
+      }
       let reason: ReceiptFault["reason"] | undefined;
       if (!verifyCountersignature(cs)) reason = "invalid-signature";
       else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys }))

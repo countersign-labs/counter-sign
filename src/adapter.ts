@@ -4,7 +4,8 @@
 
 import type { IncomingMessage } from "node:http";
 import { CountersignError } from "./core/errors.js";
-import { signDecision } from "./core/countersignature.js";
+import { normalizeActor, signDecision } from "./core/countersignature.js";
+import { deadline } from "./core/defaults.js";
 import { quorumOf } from "./core/intent.js";
 import { generateKeypair } from "./core/keys.js";
 import type { Countersignature, Decision, Intent, Resolution } from "./core/types.js";
@@ -50,6 +51,8 @@ interface PendingEntry {
   approvals: Map<string, Countersignature>;
   resolve: (r: Resolution) => void;
   reject: (err: Error) => void;
+  /** reaper that evicts the entry at the Intent's deadline (prevents unbounded growth) */
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 /** Book-keeping shared by all adapters: intents awaiting human decisions. */
@@ -58,13 +61,21 @@ export class PendingDecisions {
 
   wait(intent: Intent): Promise<Resolution> {
     return new Promise((resolve, reject) => {
-      this.entries.set(intent.intent_id, {
-        intent,
-        quorum: quorumOf(intent),
-        approvals: new Map(),
-        resolve,
-        reject,
-      });
+      const entry: PendingEntry = { intent, quorum: quorumOf(intent), approvals: new Map(), resolve, reject };
+      this.entries.set(intent.intent_id, entry);
+      // Evict the entry at the deadline so a timed-out Intent doesn't leak
+      // forever (the runtime's awaitWithDefault fires the actual Default; this
+      // only reclaims memory). Rejection is swallowed by awaitWithDefault.
+      const remaining = deadline(intent) - Date.now();
+      if (Number.isFinite(remaining)) {
+        entry.timer = setTimeout(() => {
+          if (this.entries.get(intent.intent_id) === entry) {
+            this.entries.delete(intent.intent_id);
+            reject(new CountersignError(`intent ${intent.intent_id} expired before resolution`));
+          }
+        }, Math.max(0, remaining));
+        entry.timer.unref?.();
+      }
     });
   }
 
@@ -94,23 +105,32 @@ export class PendingDecisions {
     const cs = signDecision(entry.intent, decision, actor, authoritySecret);
 
     if (decision === "reject") {
-      this.entries.delete(intentId);
-      entry.resolve({ decision: "reject", policy: "approver", countersignatures: [cs] });
+      this.finish(intentId, entry, { decision: "reject", policy: "approver", countersignatures: [cs] });
       return { countersignature: cs, status: "resolved", collected: entry.approvals.size, quorum: entry.quorum, decision: "reject" };
     }
 
-    // Dedupe approvals by actor so one person cannot fill a multi-person quorum.
-    entry.approvals.set(actor, cs);
+    // Dedupe approvals by CANONICAL actor identity so one person cannot fill a
+    // multi-person quorum via "alice"/"alice "/"Alice" variants.
+    entry.approvals.set(normalizeActor(actor), cs);
     if (entry.approvals.size >= entry.quorum) {
-      this.entries.delete(intentId);
-      entry.resolve({ decision: "approve", policy: "approver", countersignatures: [...entry.approvals.values()] });
+      this.finish(intentId, entry, { decision: "approve", policy: "approver", countersignatures: [...entry.approvals.values()] });
       return { countersignature: cs, status: "resolved", collected: entry.approvals.size, quorum: entry.quorum, decision: "approve" };
     }
     return { countersignature: cs, status: "pending", collected: entry.approvals.size, quorum: entry.quorum };
   }
 
+  /** Resolve a pending entry: cancel its reaper, drop it from the map, settle the promise. */
+  private finish(intentId: string, entry: PendingEntry, resolution: Resolution): void {
+    clearTimeout(entry.timer);
+    this.entries.delete(intentId);
+    entry.resolve(resolution);
+  }
+
   abortAll(err: Error): void {
-    for (const entry of this.entries.values()) entry.reject(err);
+    for (const entry of this.entries.values()) {
+      clearTimeout(entry.timer);
+      entry.reject(err);
+    }
     this.entries.clear();
   }
 }
@@ -139,6 +159,12 @@ let ephemeralAuthority: string | undefined;
  */
 export function authorityKeyFromEnv(): string {
   if (process.env.COUNTERSIGN_AUTHORITY_KEY) return process.env.COUNTERSIGN_AUTHORITY_KEY;
+  warnOnce(
+    "authority:ephemeral",
+    "COUNTERSIGN_AUTHORITY_KEY is not set — signing with an EPHEMERAL authority key that changes " +
+      "every restart and is lost on exit. Receipts issued now will NOT be verifiable later. Generate a " +
+      "persistent key (npm run keygen) for anything beyond a throwaway demo.",
+  );
   ephemeralAuthority ??= generateKeypair().secretKey;
   return ephemeralAuthority;
 }
@@ -169,8 +195,20 @@ export function formatIntent(intent: Intent): string {
   ].join("\n");
 }
 
-export async function readBody(req: IncomingMessage): Promise<Buffer> {
+/**
+ * Max webhook body we buffer. counter-sign envelopes are tiny; anything larger
+ * is refused BEFORE parsing or signature verification, so an unauthenticated
+ * attacker can't exhaust memory with a giant POST ahead of the auth check.
+ */
+const MAX_BODY_BYTES = 1_048_576; // 1 MiB
+
+export async function readBody(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<Buffer> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let total = 0;
+  for await (const chunk of req) {
+    total += (chunk as Buffer).length;
+    if (total > maxBytes) throw new CountersignError(`request body exceeds ${maxBytes} bytes`);
+    chunks.push(chunk as Buffer);
+  }
   return Buffer.concat(chunks);
 }

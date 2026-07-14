@@ -252,6 +252,14 @@ describe("hash chain — completeness", () => {
     expect(await log.read()).toHaveLength(1); // bare v0.1.1 line still readable
     expect(await log.verifyChain()).toMatchObject({ intact: false, brokenAt: 0, reason: "unchained-entry" });
   });
+
+  it("verifyAll REPORTS a malformed line as a fault instead of throwing", async () => {
+    await log.append(signDecision(intent(), "approve", "local:a", authority));
+    await writeFile(log.filePath, (await readFile(log.filePath, "utf8")) + '{"note":"junk-but-valid-json"}\n');
+    const r = await log.verifyAll(); // must not throw
+    expect(r.ok).toBe(false);
+    expect(r.faults.some((f) => f.reason === "malformed")).toBe(true);
+  });
 });
 
 describe("wrapAction integration", () => {

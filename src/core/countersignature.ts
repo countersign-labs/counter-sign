@@ -13,6 +13,20 @@ import {
   type Policy,
 } from "./types.js";
 
+/**
+ * Canonical form of an `actor` for distinct-approver counting. Raw-string
+ * equality lets one human masquerade as several ("alice", "alice ", "Alice",
+ * or NFC/NFD twins) and fill a multi-person quorum alone. We fold Unicode (NFC),
+ * trim, and casefold: for every shipped channel the address part is numeric
+ * (Discord/Telegram-id/WhatsApp) or case-assigned-unique (Slack IDs, email), so
+ * casefolding never merges two genuinely distinct approvers — it only defeats
+ * case-variant spoofing. Adapters must still key on STABLE ids (never a mutable
+ * username) so the identity itself can't be swapped between approvals.
+ */
+export function normalizeActor(actor: string): string {
+  return String(actor).normalize("NFC").trim().toLowerCase();
+}
+
 export interface VerifyOptions {
   /**
    * The authority key(s) the verifier trusts for this Route. When provided,

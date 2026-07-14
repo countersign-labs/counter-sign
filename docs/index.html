@@ -414,8 +414,8 @@
     <h2>Gate any function behind a human, <span class="g">in about five lines.</span></h2>
     <div class="code">
       <div class="bar">wrap a tool call — the shim signs the Intent, routes it, and only runs on approval</div>
-<pre><span class="kw">import</span> { wrapAction, ReceiptLog } <span class="kw">from</span> <span class="st">"counter-sign"</span>;
-<span class="kw">import</span> { TelegramAdapter } <span class="kw">from</span> <span class="st">"counter-sign/adapters/telegram"</span>;
+<pre><span class="kw">import</span> { wrapAction, ReceiptLog } <span class="kw">from</span> <span class="st">"@countersignlabs/counter-sign"</span>;
+<span class="kw">import</span> { TelegramAdapter } <span class="kw">from</span> <span class="st">"@countersignlabs/counter-sign/adapters/telegram"</span>;
 
 <span class="kw">const</span> deploy = <span class="fn">wrapAction</span>(deployProd,
   { action: <span class="st">"deploy.prod"</span>, summary: <span class="st">"Deploy v2.1.0 to production"</span>,

@@ -123,3 +123,85 @@ the same `maximum`. Tests: `timeout is bounded`.
   of an enterprise scanner that auto-submits forms; possession is still required.
 - **In-memory single-decision / pending state** does not survive a restart and
   is not shared across instances; a distributed deployment needs shared state.
+
+---
+
+# v0.1.2 — pre-public adversarial stress test
+
+Before making the repository public, the protocol and reference implementation
+were put through a five-front adversarial red-team (crypto core, authorization
+logic, adapters/transport, ReceiptLog integrity, DoS/fail-open), and every
+serious finding was reproduced with a runnable proof-of-concept before being
+accepted. All confirmed findings below are fixed, each with a regression test in
+`tests/security-hardening.test.ts` (or `tests/quorum.test.ts`) that encodes the
+exploit. The cryptographic primitives (ed25519, domain separation, canonical
+signing, fail-closed verifiers, no prototype pollution / ReDoS) were probed hard
+and held.
+
+## Fixed
+
+### CS-08 · `verifyResolution` quorum bypass via `resolution.policy` (BLOCKER) — FIXED
+The quorum re-derivation was gated on `resolution.policy === "approver"`, an
+attacker-controlled field. A resolution `{decision:"approve", policy:"default"}`
+carrying a single authority-signed receipt — including the public timeout-reject
+receipt — was accepted for any `quorum: N` Intent, executing the guarded action
+with zero human approvals (confirmed end-to-end: a 3-of-3 prod deploy ran).
+**Fix.** Quorum enforcement no longer branches on `policy` to decide *whether* to
+run — only *which* proof is required. Every `approve` requires either `quorum`
+distinct approvers (`policy:"approver"`) or the narrow single timeout Default
+(quorum-1 + `default:"approve"`, exactly one `default:timeout` receipt); any
+other policy is rejected, and every receipt's own `decision` must match the
+resolution's.
+
+### CS-09 · Enforcement path trusted unvalidated Intents (High) — FIXED
+`awaitWithDefault`/`verifyResolution` never re-validated a received Intent, and
+`quorumOf` silently downgraded a malformed quorum (`"3"`, `2.5`, `0`) to `1`; a
+`NaN`/huge `created_at`/`timeout` collapsed the veto window (`setTimeout(NaN)`
+fires immediately → instant Default). **Fix.** `assertIntentInvariants` +
+`verifyIntent` run at the enforcement boundary (fail closed); `quorumOf` throws
+on a malformed quorum instead of downgrading.
+
+### CS-10 · WhatsApp / Telegram webhooks fail-open (High) — FIXED
+Both skipped signature/secret verification when the (documented-as-optional)
+secret was unset, so a network attacker who learned an `intent_id` forged an
+approval. **Fix.** `WHATSAPP_APP_SECRET` is required; `TelegramAdapter.webhookHandler()`
+refuses to run without `TELEGRAM_WEBHOOK_SECRET` and compares it constant-time.
+
+### CS-11 · Actor identity spoofing / mutable id (High) — FIXED
+Distinct-approver dedup was raw-string (`alice`/`Alice`/`alice ` counted as
+three), and Telegram keyed on the mutable `@username`. **Fix.** `normalizeActor`
+(NFC + trim + casefold) for all dedup; Telegram keys on the stable numeric id.
+
+### CS-12 · DoS: unbounded `readBody` and leaking `PendingDecisions` (High) — FIXED
+`readBody` buffered without limit before auth; timed-out Intents leaked their
+`PendingEntry` forever. **Fix.** `readBody` caps at 1 MiB (throws before
+parse/auth); `PendingDecisions` reaps each entry at its deadline.
+
+### CS-13 · Robustness (Medium) — FIXED
+Ephemeral authority/agent keys are now warned loudly (silent-key footgun);
+`ReceiptLog.verifyAll` reports a malformed line as a fault instead of throwing;
+`isChainEntry` rejects a non-receipt (e.g. array) payload.
+
+## Documented, not "fixed" — accurate claims + planned crypto
+
+Two features were **overclaimed** in earlier docs. The claims are corrected;
+the stronger *cryptographic* versions are planned for v0.2. These are design
+properties, not bugs — the reference behaviour is unchanged, the wording is.
+
+- **ReceiptLog is not standalone tamper-evident.** The chain is keyless SHA-256:
+  a writer who tampers can recompute every downstream `prev` and pass
+  `verifyChain`. Real tamper-evidence requires an externally-anchored `head()`
+  (`expectedHead`). Docs/comments/site now say so; **v0.2** adds a keyed,
+  self-anchoring chain (a signed head per append).
+- **Quorum four-eyes is authority-enforced, not cryptographic separation of
+  duty.** Distinctness is over `actor` strings the single authority key vouches
+  for, so a holder of that key can mint N distinct receipts. Spec §1 "Trust
+  model" and the README/`awaitWithDefault` docs now state this; **v0.2** adds
+  per-approver keys (one verifying receipt per distinct trusted key).
+
+## Interop note (Medium)
+"Canonical JSON" is under-specified for *third-party* verifiers (number
+formatting, key-sort by UTF-16 code unit, duplicate keys, NFC). Same-impl this
+is safe (fixed ASCII keys, bounded integers, re-canonicalizing verifiers). To be
+pinned normatively (RFC 8785 / JCS) before other-language implementations are
+relied upon.

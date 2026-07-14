@@ -7,6 +7,26 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 
 ## [Unreleased]
 
+### Security
+- **Fixed an authorization bypass (BLOCKER):** `verifyResolution` gated its
+  quorum check on the attacker-supplied `resolution.policy`, so a `policy:"default"`
+  approve with a single authority-signed receipt (even the public timeout-reject
+  receipt) authorized any quorum-N Intent. Quorum is now enforced for every
+  `approve` regardless of policy; each receipt's decision must match the resolution.
+- **Fail-closed hardening:** enforcement path validates Intent invariants +
+  agent signature; `quorumOf` throws on a malformed quorum; a NaN/huge
+  `created_at`/`timeout` can no longer collapse the veto window.
+- **Webhooks fail closed:** `WHATSAPP_APP_SECRET` required; Telegram
+  `webhookHandler` refuses to run without `TELEGRAM_WEBHOOK_SECRET` (constant-time
+  check). Telegram keys the approver on the stable numeric id, not the `@username`.
+- **DoS:** `readBody` size-capped (1 MiB); `PendingDecisions` reaps entries at
+  their deadline. Actor dedup normalizes (NFC+trim+casefold).
+- **Honesty:** ReceiptLog "tamper-evident" and quorum "four-eyes" claims corrected
+  — the chain needs an anchored `head()`, and quorum is authority-enforced, not
+  cryptographic separation of duty. Keyed self-anchoring log + per-approver-key
+  quorum are on the v0.2 roadmap. See [docs/security-review.md](docs/security-review.md).
+- 14 regression tests encode each exploit. No wire-format change; v0.1.x receipts still verify.
+
 ## [0.1.2] — 2026-07-09
 
 ### Added

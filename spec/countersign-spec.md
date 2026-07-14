@@ -67,6 +67,18 @@ reached can never be satisfied and will always resolve to the Default. A
 self-defeating, since a timeout would authorize the action without the
 required approvers. For a quorum, the Default is therefore always `reject`.
 
+**Trust model (important).** In this version, distinctness is counted over the
+`actor` strings the **authority** vouches for; approvers are not separately
+keyed. A quorum therefore protects against an *under-count* — an adapter
+presenting fewer than `quorum` receipts, a repeated approver, or a decision
+mislabelled to skip the check — but it does **not** provide cryptographic
+separation of duty: a party in possession of the single authority key can mint
+`quorum` receipts with distinct `actor` values. Four-eyes here is a control the
+*trusted authority* enforces, not one the mathematics enforces against that
+authority. Deployments that need multi-party separation of duty SHOULD bind each
+approver to a distinct key and require one verifying receipt per key — a
+per-approver-key quorum is a planned extension (see §6).
+
 ## 2. Route
 
 A Route delivers an Intent to where its approvers actually live — Telegram,
@@ -219,8 +231,18 @@ the Default fires.
 This is version 0.1, a draft for implementation feedback. The `countersign`
 field pins the version in every envelope and receipt. Breaking changes bump
 the minor version until 1.0. Anything not specified here — approver
-directories, multi-approver quorums, delegation chains, revocation — is
-deliberately left to implementations for now.
+directories, delegation chains, revocation — is deliberately left to
+implementations for now.
+
+Two hardening items are explicitly **planned** (and called out where the
+current design is weaker than a reader might assume): **per-approver-key
+quorum** — binding each approver to a distinct key so M-of-N is cryptographic
+separation of duty rather than a count the single authority vouches for (§1
+"Trust model", §3); and a **keyed, self-anchoring receipt log** — a signed head
+per append so an append-only audit trail is tamper-evident without an external
+anchor. Until then, deployments needing those properties should apply the
+mitigations noted in-line (distinct approver keys; an externally-anchored log
+head).
 
 ---
 

@@ -80,6 +80,12 @@ works on the chat channels and the local approver, where distinct people can
 each respond (`npm run demo:quorum` shows a no-network two-person flow). The
 single-recipient email flow supports `quorum: 1` only and refuses more.
 
+Distinctness is counted over the identities the **trusted authority** records,
+so `quorum` is a control that authority enforces — not cryptographic separation
+of duty against a compromised authority key (a holder of that key can mint N
+distinct receipts). Binding each approver to a distinct key is on the roadmap;
+see the spec's *Trust model*.
+
 ## Why receipts, not booleans
 
 An approval that evaporates after the `if` statement is worth nothing in an
@@ -118,36 +124,40 @@ const receiptLog = new ReceiptLog("./receipts.jsonl");
 const refund = wrapAction(issueRefund, fields, adapter, { receiptLog });
 ```
 
-The file *is* the audit trail, and it proves two distinct things offline, with
-no trust in the process that wrote it:
+The file records the audit trail, and it gives you two different guarantees —
+one keyed and strong, one that depends on an anchor:
 
-- **Authenticity** — each line carries an independently verifiable
-  Countersignature (the integrity is in the signatures, not the storage).
-- **Completeness** — the entries are **hash-chained**: every line commits to a
-  hash of the one before it, so an edit, reorder, insertion, or mid-stream
-  deletion breaks the chain and is detectable. Recording completes *before* the
+- **Authenticity (keyed).** Each line carries an independently verifiable
+  Countersignature; a forged or altered receipt fails verification against the
+  trusted authority key — *this* holds with no trust in the process that wrote
+  the file, because the signatures are keyed. Recording completes *before* the
   guarded action runs, so an approval you cannot remember is one the runtime
   declines to act on.
+- **Completeness (relative to an anchor).** Entries are hash-chained — every
+  line commits to a SHA-256 of the one before it. The chain is **keyless**, so
+  on its own it catches accidental corruption and naive edits, but it is **not**
+  evidence against someone who can rewrite the file: they can recompute every
+  downstream hash and produce an intact-looking chain. To get real
+  tamper-evidence, checkpoint `head()` somewhere the writer cannot reach and
+  verify against it — then *any* edit, reorder, insertion, deletion, or
+  truncation at or below the anchor is caught (`diverged` / `truncated`).
 
 ```ts
-const report = await receiptLog.verifyAll({ trustedKeys: [OUR_AUTHORITY_PUBLIC_KEY] });
+const head = await receiptLog.head();   // { length, hash } — anchor this out of band
+// …later, audit against your anchor:
+const report = await receiptLog.verifyAll({ trustedKeys: [OUR_AUTHORITY_PUBLIC_KEY], expectedHead: head });
 // { total, valid, ok, faults: [...], chain: { intact, brokenAt?, reason? } }
-// ok === true  ⇢  every receipt is genuine AND nothing was altered or removed.
+// ok === true  ⇢  every receipt is genuine AND the log is intact against your anchor.
+// Without expectedHead, ok proves signatures + internal chain consistency — NOT
+// that nothing was removed by a writer who re-chained.
 const perIntent = await receiptLog.history(); // Map<intent_id, Countersignature[]>
 ```
 
-A forward chain cannot, by itself, tell that the *newest* entries were truncated
-— what remains still links cleanly. Checkpoint the head somewhere the operator
-cannot silently rewrite, then anchor against it to catch truncation too:
-
-```ts
-const head = await receiptLog.head();               // { length, hash } — store this out of band
-await receiptLog.verifyChain(head);                 // later: fails if the log was shortened below it
-```
-
-`ReceiptLog` is a file-backed implementation of the `ReceiptSink` interface;
-put SQLite, Postgres, or a log pipeline behind that interface to store the
-history wherever your deployment already keeps its records.
+`ReceiptLog` is a **single-writer** file-backed `ReceiptSink` (point separate
+processes at separate files). For multi-writer storage or standalone
+tamper-evidence that needs no external anchor, put SQLite, Postgres, or a
+*signed* transparency log behind the `ReceiptSink` interface. (A keyed,
+self-anchoring chain — a signed head on every append — is on the roadmap.)
 
 ## Compliance and evidence
 

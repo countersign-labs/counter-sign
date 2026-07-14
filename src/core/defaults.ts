@@ -112,13 +112,19 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
  * veto), otherwise with the Default's Resolution.
  *
  * Whatever comes back is bound to the caller's authority before it is
- * returned (see verifyResolution): every receipt MUST decide this exact
- * `intent_id` and be signed by the key derived from `authoritySecret`, and an
- * `approve` MUST be backed by `quorum` distinct approvers. This is the choke
- * point that stops a rogue or misconfigured adapter from having a self-signed
- * or under-quorum "approve" accepted — integrity alone is not authority. The
- * adapter that produces decisions therefore MUST sign with the same authority
- * key passed here.
+ * returned (see verifyResolution): the Intent must be valid and agent-signed,
+ * every receipt MUST decide this exact `intent_id`, be signed by the key derived
+ * from `authoritySecret`, and carry the resolution's own decision; an `approve`
+ * MUST be backed by `quorum` distinct approvers (or be the narrow quorum-1
+ * timeout Default). This choke point stops an under-quorum, wrong-key,
+ * decision-mismatched, or policy-mislabelled "approve" from being accepted —
+ * integrity alone is not authority.
+ *
+ * It does NOT provide separation of duty against the authority key itself:
+ * distinctness is over `actor` strings the authority vouches for, so a holder of
+ * that key can still mint `quorum` distinct receipts. The adapter that produces
+ * decisions MUST sign with the same authority key passed here, and MUST be
+ * trusted to map real humans to actors. See the spec §1 "Trust model".
  */
 export async function awaitWithDefault(
   intent: Intent,

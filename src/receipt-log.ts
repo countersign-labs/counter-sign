@@ -25,10 +25,13 @@ export interface ReceiptSink {
 
 /**
  * One line of a chained log: a receipt, its position, and a hash of the entry
- * before it. `prev` links every entry to its predecessor, so the sequence
- * cannot be reordered, and no entry inserted or removed, without breaking the
- * chain. The Countersignature inside is byte-for-byte the portable receipt —
- * the envelope is log metadata, never part of the signed artifact.
+ * before it. `prev` links every entry to its predecessor. The chain is KEYLESS
+ * (plain SHA-256, no secret), so it detects accidental corruption and naive
+ * edits — but a writer who tampers can recompute every downstream `prev` and
+ * produce an intact-looking chain. Real tamper-evidence comes only from
+ * verifying against an externally-anchored `head()` (see the class doc). The
+ * Countersignature inside is byte-for-byte the portable receipt — the envelope
+ * is log metadata, never part of the signed artifact.
  */
 export interface ChainEntry {
   /** zero-based position in the log */
@@ -162,21 +165,25 @@ function walkChain(lines: ParsedLine[], expectedHead?: ChainHead): ChainReport {
 }
 
 /**
- * An append-only, hash-chained, tamper-evident memory of decisions, stored
- * where the runtime is installed. Each line is the canonical JSON of a
- * {@link ChainEntry} — a receipt plus a hash of the entry before it — so the
- * file is a portable approval history that proves two distinct things offline,
- * with no trust in the process that wrote it:
+ * An append-only, hash-chained memory of decisions, stored where the runtime is
+ * installed. Each line is the canonical JSON of a {@link ChainEntry} — a receipt
+ * plus a hash of the entry before it. It gives two DIFFERENT guarantees, and it
+ * is important not to conflate them:
  *
- *  1. **Authenticity** — every receipt is a genuine Countersignature
- *     (`verifyAll`, using the signatures).
- *  2. **Completeness** — the entries have not been edited, reordered, inserted,
- *     or deleted mid-stream (`verifyChain`, using the `prev` links).
- *
- * A forward chain cannot, by itself, detect that the *newest* entries were
- * truncated — what remains still links cleanly. Capture `head()` and anchor it
- * somewhere the operator cannot silently rewrite, then pass it as
- * `expectedHead` to catch truncation too.
+ *  1. **Authenticity (keyed, standalone).** Every receipt is a genuine
+ *     Countersignature — `verifyAll` checks each ed25519 signature against the
+ *     trusted authority key. This holds with no trust in the writer, because the
+ *     signatures are keyed: a forged/altered receipt fails, full stop.
+ *  2. **Completeness (relative to an anchor).** `verifyChain` walks the `prev`
+ *     links. The chain is KEYLESS, so on its own it catches accidental
+ *     corruption and lazy edits but NOT a deliberate rewrite: a writer can
+ *     recompute every downstream hash and pass `verifyChain`. Real
+ *     tamper-evidence requires capturing `head()` and anchoring it somewhere the
+ *     writer cannot reach, then verifying against it (`expectedHead`) — that
+ *     catches any edit, reorder, insertion, deletion, or truncation at/below the
+ *     anchor (`diverged`/`truncated`). Do NOT market this log as standalone
+ *     tamper-evident; the anchor is the mechanism. (A keyed, self-anchoring
+ *     chain — a signed head per append — is a roadmap item.)
  *
  * The log is opt-in. Pass one to `wrapAction({ receiptLog })` and every resolved
  * Intent — an approval, a veto, or a timeout Default — is recorded before the

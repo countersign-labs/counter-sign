@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0; see LICENSE at repo root.
 
+import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   authorityKeyFromEnv,
@@ -10,12 +11,18 @@ import {
   parseDecisionPayload,
   readBody,
   requireEnv,
-  warnOnce,
   PendingDecisions,
   type Adapter,
   type SettleResult,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
+
+/** Constant-time compare of the webhook secret token (length is not secret). */
+function secretEquals(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
 import type { Intent, Resolution } from "../core/types.js";
 
 export interface TelegramConfig {
@@ -92,7 +99,9 @@ export class TelegramAdapter implements Adapter {
       await this.api("answerCallbackQuery", { callback_query_id: cb.id, text: "Request no longer pending." }).catch(() => {});
       return null;
     }
-    const actor = `telegram:${cb.from?.username ?? cb.from?.id ?? "unknown"}`;
+    // Key on the STABLE numeric id, never the mutable @username — a user could
+    // change their username between approvals to be counted as two distinct approvers.
+    const actor = `telegram:${cb.from?.id ?? "unknown"}`;
     const result = this.pending.settle(parsed.intentId, parsed.decision, actor, this.cfg.authorityKey);
     if (!result) return null;
     const ack =
@@ -118,20 +127,20 @@ export class TelegramAdapter implements Adapter {
 
   /** Node HTTP handler for TELEGRAM_MODE=webhook (set via setWebhook). */
   webhookHandler(): (req: IncomingMessage, res: ServerResponse) => void {
-    if (!this.cfg.webhookSecret) {
-      warnOnce(
-        "telegram:no-webhook-secret",
-        "Telegram webhook is running WITHOUT a secret token. Set TELEGRAM_WEBHOOK_SECRET (and pass it to " +
-          "setWebhook) so spoofed updates are rejected; otherwise anyone who learns an intent_id can forge a decision.",
+    const secret = this.cfg.webhookSecret;
+    if (!secret)
+      throw new CountersignError(
+        "Telegram webhook requires a secret token: set TELEGRAM_WEBHOOK_SECRET (and pass it to setWebhook). " +
+          "Refusing to expose an unauthenticated webhook — anyone who learns an intent_id could otherwise forge a decision.",
       );
-    }
     return (req, res) => {
       void (async () => {
         if (req.method !== "POST") {
           res.writeHead(405).end();
           return;
         }
-        if (this.cfg.webhookSecret && req.headers["x-telegram-bot-api-secret-token"] !== this.cfg.webhookSecret) {
+        const provided = req.headers["x-telegram-bot-api-secret-token"];
+        if (typeof provided !== "string" || !secretEquals(provided, secret)) {
           res.writeHead(401).end();
           return;
         }

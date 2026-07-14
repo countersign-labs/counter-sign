@@ -17,6 +17,6 @@ export {
   utf8,
   type Keypair,
 } from "./keys.js";
-export { createIntent, verifyIntent, quorumOf, type AgentIdentity } from "./intent.js";
-export { signDecision, verifyCountersignature, type VerifyOptions } from "./countersignature.js";
+export { createIntent, verifyIntent, quorumOf, assertIntentInvariants, type AgentIdentity } from "./intent.js";
+export { signDecision, verifyCountersignature, normalizeActor, type VerifyOptions } from "./countersignature.js";
 export { deadline, isExpired, defaultResolution, verifyResolution, awaitWithDefault } from "./defaults.js";

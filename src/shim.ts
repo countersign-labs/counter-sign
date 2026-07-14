@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0; see LICENSE at repo root.
 
-import { authorityKeyFromEnv, type Adapter } from "./adapter.js";
+import { authorityKeyFromEnv, warnOnce, type Adapter } from "./adapter.js";
 import { awaitWithDefault } from "./core/defaults.js";
 import { IntentRejectedError } from "./core/errors.js";
 import { createIntent, type AgentIdentity } from "./core/intent.js";
@@ -34,10 +34,14 @@ export interface WrapOptions {
 let processAgent: AgentIdentity | undefined;
 
 function defaultAgent(): AgentIdentity {
-  processAgent ??= {
-    id: process.env.COUNTERSIGN_AGENT_ID ?? "agent:local",
-    keypair: generateKeypair(),
-  };
+  if (!processAgent) {
+    warnOnce(
+      "agent:ephemeral",
+      "No agent identity was supplied to wrapAction — using an EPHEMERAL agent key that changes every " +
+        "restart, so Intents will not be attributable to a stable agent identity. Pass a persistent agent keypair for production.",
+    );
+    processAgent = { id: process.env.COUNTERSIGN_AGENT_ID ?? "agent:local", keypair: generateKeypair() };
+  }
   return processAgent;
 }
 

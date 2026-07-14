@@ -56,9 +56,49 @@ export function createIntent(fields: IntentFields, agent: AgentIdentity): Intent
   return { ...unsigned, signature };
 }
 
-/** Distinct approvals required to authorize an Intent (defaults to 1). */
+/**
+ * Distinct approvals required to authorize an Intent. An ABSENT quorum means 1
+ * (the wire format makes it optional); a PRESENT-but-malformed quorum FAILS
+ * CLOSED by throwing, rather than silently downgrading to 1 — a downgrade would
+ * let a `quorum: "3"` or `quorum: 2.5` Intent be authorized by a single approver.
+ */
 export function quorumOf(intent: Intent): number {
-  return Number.isInteger(intent.quorum) && intent.quorum >= 1 ? intent.quorum : 1;
+  const q = intent.quorum;
+  if (q === undefined || q === null) return 1;
+  if (!Number.isInteger(q) || q < 1)
+    throw new CountersignError(`Intent.quorum must be an integer >= 1 (got ${JSON.stringify(q)})`);
+  return q;
+}
+
+/**
+ * Re-validate a received Intent's structural invariants — the same rules
+ * createIntent enforces at authorship — before acting on it. Intents cross trust
+ * boundaries (a2a, callbacks), so the enforcing runtime MUST NOT trust that a
+ * wire Intent's fields are well-formed just because its signature verifies:
+ * verifyIntent proves the agent authored the bytes, not that quorum/timeout/
+ * created_at are in range. Throws CountersignError on any violation (fail closed).
+ */
+export function assertIntentInvariants(intent: Intent): void {
+  if (!intent || typeof intent !== "object") throw new CountersignError("intent must be an object");
+  if (typeof intent.intent_id !== "string" || intent.intent_id.length === 0)
+    throw new CountersignError("Intent.intent_id must be a non-empty string");
+  if (typeof intent.action !== "string" || intent.action.length === 0)
+    throw new CountersignError("Intent.action is required");
+  if (typeof intent.summary !== "string" || intent.summary.length === 0)
+    throw new CountersignError("Intent.summary is required");
+  if (!RISK_TIERS.has(intent.risk_tier)) throw new CountersignError(`invalid risk_tier: ${intent.risk_tier}`);
+  if (!Array.isArray(intent.approvers) || intent.approvers.length === 0)
+    throw new CountersignError("Intent.approvers must be a non-empty array");
+  const quorum = intent.quorum ?? 1;
+  if (!Number.isInteger(quorum) || quorum < 1)
+    throw new CountersignError("Intent.quorum must be an integer >= 1");
+  if (quorum > 1 && intent.default === "approve")
+    throw new CountersignError("Intent.quorum > 1 must not be combined with default: approve");
+  if (!Number.isInteger(intent.timeout) || intent.timeout < 1 || intent.timeout > MAX_TIMEOUT_SECONDS)
+    throw new CountersignError(`Intent.timeout must be an integer number of seconds in [1, ${MAX_TIMEOUT_SECONDS}]`);
+  if (!DECISIONS.has(intent.default)) throw new CountersignError(`invalid default: ${intent.default}`);
+  if (typeof intent.created_at !== "string" || !Number.isFinite(Date.parse(intent.created_at)))
+    throw new CountersignError("Intent.created_at must be a valid ISO 8601 timestamp");
 }
 
 /** Verify the agent's signature over the canonical envelope. Never throws. */

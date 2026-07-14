@@ -93,6 +93,7 @@ const cases: Case[] = [
         chatId: "1",
         authorityKey: authority.secretKey,
         mode: "webhook",
+        webhookSecret: "tg-secret",
       });
       const { server, base } = await listen(adapter.webhookHandler());
       return {
@@ -101,7 +102,7 @@ const cases: Case[] = [
         approve: async (intent) => {
           await fetch(`${base}/`, {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": "tg-secret" },
             body: JSON.stringify({
               update_id: 1,
               callback_query: {
@@ -380,6 +381,7 @@ describe("webhook authentication is enforced before any payload is trusted", () 
       phoneNumberId: "p",
       to: "1",
       verifyToken: "expected-token",
+      appSecret: "meta-app-secret",
       authorityKey: authority.secretKey,
     });
     const { server, base } = await listen(adapter.webhookHandler());

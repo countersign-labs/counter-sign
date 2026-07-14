@@ -35,12 +35,17 @@ function intent(quorum: number, overrides: Partial<IntentFields> = {}): Intent {
 }
 
 describe("quorumOf", () => {
-  it("defaults to 1 when the field is absent or invalid", () => {
+  it("treats an ABSENT quorum as 1 but FAILS CLOSED on a malformed one", () => {
     const i = intent(1);
     expect(quorumOf(i)).toBe(1);
     expect(quorumOf({ ...i, quorum: undefined as unknown as number })).toBe(1);
-    expect(quorumOf({ ...i, quorum: 0 })).toBe(1);
     expect(quorumOf({ ...i, quorum: 3 })).toBe(3);
+    // A present-but-malformed quorum must NOT silently downgrade to 1 — that
+    // would let a `quorum: "3"` / `2.5` / `0` Intent be authorized by one approver.
+    expect(() => quorumOf({ ...i, quorum: 0 })).toThrow();
+    expect(() => quorumOf({ ...i, quorum: -1 })).toThrow();
+    expect(() => quorumOf({ ...i, quorum: 2.5 })).toThrow();
+    expect(() => quorumOf({ ...i, quorum: "3" as unknown as number })).toThrow();
   });
 
   it("createIntent rejects a quorum below 1 and includes it in the signed envelope", () => {
@@ -205,15 +210,25 @@ describe("quorum security", () => {
     expect(intent(1, { default: "approve" }).default).toBe("approve");
   });
 
-  it("times out fail-closed (reject) for a quorum intent even if it declared default:approve", async () => {
+  it("rejects a non-conforming quorum>1 + default:approve Intent at the enforcement boundary (fail closed)", async () => {
+    // Hand-craft a non-conforming Intent (createIntent would refuse it). The
+    // enforcement path must not process it at all: assertIntentInvariants throws
+    // up front, so a timeout can never authorize a quorum action via a bad
+    // default. Fail-closed by refusal is stricter than the old coerce-to-reject.
+    const bad = { ...intent(2), default: "approve" as const };
+    await expect(
+      awaitWithDefault(bad, new Promise<Resolution>(() => {}), authority.secretKey),
+    ).rejects.toThrow(/default: approve|quorum/);
+  });
+
+  it("still times out fail-closed (reject) for a CONFORMING quorum>1 intent", async () => {
     vi.useFakeTimers();
     try {
-      // Hand-craft a non-conforming Intent (createIntent would refuse it).
-      const bad = { ...intent(2), default: "approve" as const };
-      const pending = awaitWithDefault(bad, new Promise<Resolution>(() => {}), authority.secretKey);
+      const i = intent(2); // quorum 2, default reject — conforming
+      const pending = awaitWithDefault(i, new Promise<Resolution>(() => {}), authority.secretKey);
       await vi.advanceTimersByTimeAsync(300_000);
       const r = await pending;
-      expect(r.decision).toBe("reject"); // silence must not authorize a quorum action
+      expect(r.decision).toBe("reject");
       expect(r.policy).toBe("default");
     } finally {
       vi.useRealTimers();

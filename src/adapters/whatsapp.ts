@@ -10,7 +10,6 @@ import {
   parseDecisionPayload,
   readBody,
   requireEnv,
-  warnOnce,
   PendingDecisions,
   type Adapter,
 } from "../adapter.js";
@@ -27,8 +26,8 @@ export interface WhatsAppConfig {
   templateLang: string;
   /** Token echoed back during Meta's webhook GET verification. */
   verifyToken: string;
-  /** Optional app secret; verifies X-Hub-Signature-256 on webhook POSTs. */
-  appSecret?: string;
+  /** App secret. REQUIRED — verifies X-Hub-Signature-256 on every webhook POST. */
+  appSecret: string;
   authorityKey: string;
   graphBase: string;
 }
@@ -41,7 +40,9 @@ export function whatsappConfigFromEnv(overrides: Partial<WhatsAppConfig> = {}): 
     templateName: overrides.templateName ?? process.env.WHATSAPP_TEMPLATE_NAME ?? "countersign_approval",
     templateLang: overrides.templateLang ?? process.env.WHATSAPP_TEMPLATE_LANG ?? "en",
     verifyToken: overrides.verifyToken ?? requireEnv("WHATSAPP_VERIFY_TOKEN"),
-    appSecret: overrides.appSecret ?? process.env.WHATSAPP_APP_SECRET,
+    // REQUIRED, not optional: without it the webhook would run fail-open and
+    // anyone who learns an intent_id could forge a decision.
+    appSecret: overrides.appSecret ?? requireEnv("WHATSAPP_APP_SECRET"),
     authorityKey: overrides.authorityKey ?? authorityKeyFromEnv(),
     graphBase: overrides.graphBase ?? process.env.WHATSAPP_GRAPH_BASE ?? "https://graph.facebook.com/v20.0",
   };
@@ -118,13 +119,6 @@ export class WhatsAppAdapter implements Adapter {
    * and settles pending intents on quick-reply button messages.
    */
   webhookHandler(): (req: IncomingMessage, res: ServerResponse) => void {
-    if (!this.cfg.appSecret) {
-      warnOnce(
-        "whatsapp:no-app-secret",
-        "WhatsApp webhook is running WITHOUT payload signature verification. Set WHATSAPP_APP_SECRET " +
-          "so X-Hub-Signature-256 is checked; otherwise anyone who learns an intent_id can forge a decision.",
-      );
-    }
     return (req, res) => {
       void (async () => {
         const url = new URL(req.url ?? "/", "http://localhost");
@@ -141,7 +135,7 @@ export class WhatsAppAdapter implements Adapter {
           return;
         }
         const body = await readBody(req);
-        if (this.cfg.appSecret && !this.verifyHubSignature(body, req.headers["x-hub-signature-256"] as string | undefined)) {
+        if (!this.verifyHubSignature(body, req.headers["x-hub-signature-256"] as string | undefined)) {
           res.writeHead(401).end("invalid hub signature");
           return;
         }
@@ -169,7 +163,7 @@ export class WhatsAppAdapter implements Adapter {
   }
 
   verifyHubSignature(rawBody: Buffer, header: string | undefined): boolean {
-    if (!this.cfg.appSecret || !header?.startsWith("sha256=")) return false;
+    if (!header?.startsWith("sha256=")) return false;
     const expected = createHmac("sha256", this.cfg.appSecret).update(rawBody).digest("hex");
     const a = Buffer.from(`sha256=${expected}`);
     const b = Buffer.from(header);

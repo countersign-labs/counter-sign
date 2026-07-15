@@ -22,7 +22,9 @@ const server = createServer(adapter.interactionHandler()).listen(port);
 console.log(`Interactions endpoint listening on :${port} — make sure your public tunnel points here.`);
 
 try {
-  await runDemo(adapter, demoFields({ approvers: [`discord:${process.env.DISCORD_CHANNEL_ID}`] }));
+  // The actor is the user who clicks (`discord:<user id>`), not the channel — set
+  // DISCORD_APPROVER_ID to the approver's Discord user id.
+  await runDemo(adapter, demoFields({ approvers: [`discord:${process.env.DISCORD_APPROVER_ID ?? "YOUR_DISCORD_USER_ID"}`] }));
 } finally {
   server.close();
 }

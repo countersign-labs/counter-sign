@@ -47,6 +47,8 @@ export interface SettleResult {
 interface PendingEntry {
   intent: Intent;
   quorum: number;
+  /** normalized identities allowed to decide (the Intent's `approvers`) */
+  approverSet: Set<string>;
   /** approve receipts keyed by distinct actor, so one person cannot fill a multi-person quorum */
   approvals: Map<string, Countersignature>;
   resolve: (r: Resolution) => void;
@@ -61,7 +63,14 @@ export class PendingDecisions {
 
   wait(intent: Intent): Promise<Resolution> {
     return new Promise((resolve, reject) => {
-      const entry: PendingEntry = { intent, quorum: quorumOf(intent), approvals: new Map(), resolve, reject };
+      const entry: PendingEntry = {
+        intent,
+        quorum: quorumOf(intent),
+        approverSet: new Set(intent.approvers.map(normalizeActor)),
+        approvals: new Map(),
+        resolve,
+        reject,
+      };
       this.entries.set(intent.intent_id, entry);
       // Evict the entry at the deadline so a timed-out Intent doesn't leak
       // forever (the runtime's awaitWithDefault fires the actual Default; this
@@ -69,10 +78,14 @@ export class PendingDecisions {
       const remaining = deadline(intent) - Date.now();
       if (Number.isFinite(remaining)) {
         entry.timer = setTimeout(() => {
-          if (this.entries.get(intent.intent_id) === entry) {
-            this.entries.delete(intent.intent_id);
-            reject(new CountersignError(`intent ${intent.intent_id} expired before resolution`));
-          }
+          // Evict the timed-out entry to reclaim memory, but do NOT reject this
+          // promise: awaitWithDefault races it against its OWN default timer, and
+          // rejecting here (the reaper is registered first, so at an equal deadline
+          // it fires first) would make that race reject instead of resolving to the
+          // signed Default. Leave the promise pending; it is GC'd once the race
+          // settles to the Default. A late decision after eviction is ignored by
+          // settle() (unknown intent_id → null), matching "the Default already decided".
+          if (this.entries.get(intent.intent_id) === entry) this.entries.delete(intent.intent_id);
         }, Math.max(0, remaining));
         entry.timer.unref?.();
       }
@@ -102,6 +115,10 @@ export class PendingDecisions {
   settle(intentId: string, decision: Decision, actor: string, authoritySecret: string): SettleResult | null {
     const entry = this.entries.get(intentId);
     if (!entry) return null;
+    // Only the Intent's named approvers can decide. An unlisted actor's click is
+    // ignored — it neither counts toward quorum nor vetoes — so channel membership
+    // is not authority. (The timeout Default is signed elsewhere, not via settle.)
+    if (!entry.approverSet.has(normalizeActor(actor))) return null;
     const cs = signDecision(entry.intent, decision, actor, authoritySecret);
 
     if (decision === "reject") {

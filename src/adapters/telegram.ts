@@ -151,7 +151,11 @@ export class TelegramAdapter implements Adapter {
           // Malformed update; acknowledge anyway so Telegram does not retry forever.
         }
         res.writeHead(200, { "content-type": "text/plain" }).end("ok");
-      })();
+      })().catch(() => {
+        // e.g. an oversized body (readBody throws past the cap): respond and never
+        // leave the request hanging or surface an unhandled rejection.
+        if (!res.headersSent) res.writeHead(500).end();
+      });
     };
   }
 

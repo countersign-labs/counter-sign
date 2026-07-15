@@ -131,7 +131,11 @@ describe("resolution validation at the race boundary", () => {
 
   it("defaultResolution is portable and every receipt verifies standalone", () => {
     const intent = intentWith(5, "approve");
+    // A Default can only be minted once the deadline has passed (CS-22).
+    vi.useFakeTimers();
+    vi.setSystemTime(deadline(intent) + 1);
     const r = defaultResolution(intent, authority);
+    vi.useRealTimers();
     expect(verifyCountersignature(r.countersignatures[0])).toBe(true);
     expect(r.countersignatures[0].intent_id).toBe(intent.intent_id);
   });

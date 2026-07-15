@@ -201,6 +201,13 @@ the Default fires.
 - A resolution reached before the deadline wins; any decision arriving after
   the deadline MUST be ignored (the Default already decided). A partial quorum
   that never completes in time yields the Default, not an approval.
+- The converse holds too: the Default fires AT the deadline, never before. An
+  enforcing runtime MUST NOT mint a Default receipt early, MUST ignore a
+  `policy: "default"` resolution presented before the deadline (the genuine
+  Default fires on time), and verifiers MUST reject a `policy: "default"`
+  receipt whose signed `timestamp` precedes `created_at + timeout` — an early
+  "timeout" is a fabricated one, whether a false rejection record or an
+  approval before the review window closed.
 - `default: "approve"` is legitimate for low-risk actions but SHOULD be
   paired with a short timeout; `risk_tier: "critical"` Intents SHOULD
   declare `default: "reject"`.

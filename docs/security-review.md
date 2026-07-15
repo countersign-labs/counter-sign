@@ -279,3 +279,54 @@ An adversarial re-review of the five hardening commits above found one more:
   quorum); a `policy:"default"` resolution must be exactly the canonical
   `default:timeout` receipt whose decision matches what `defaultResolution`
   would produce; any other policy is rejected.
+
+The adversarial review of the CS-21 fix found one more:
+
+- **CS-22 · Default receipts were accepted before the timeout fired (Critical) —
+  FIXED.** Nothing checked a `policy:"default"` receipt against the deadline:
+  an adapter could return `defaultResolution(intent, key)` immediately and
+  `awaitWithDefault` accepted it ~the full window early. For `default:"reject"`
+  that forges a "nobody responded" audit record (and bypasses CS-21's allowlist
+  via the `default:timeout` actor); for `default:"approve"` it made `wrapAction`
+  execute without waiting for human review — the review window collapsed to
+  zero. Three layers now enforce "the Default fires AT the deadline, never
+  before": `defaultResolution` refuses to mint while `now < deadline`;
+  `verifyResolution` rejects a default receipt whose signed `timestamp`
+  precedes the deadline (offline-verifiable — the timestamp is
+  signature-protected); and `awaitWithDefault` discards any adapter-supplied
+  `policy:"default"` resolution observed before the deadline (even one with a
+  forged future timestamp, signable by an authority-key holder), letting the
+  runtime's own timer mint the genuine Default on time. Spec §4 now states the
+  rule. +6 tests, including a `wrapAction`-level regression proving the action
+  cannot execute before the window closes.
+
+An adversarial multi-agent re-review of the CS-22 fix (4 attack lenses → verify)
+confirmed one regression it had introduced and refuted three other candidates:
+
+- **CS-23 · The CS-22 mint guard could crash/hang the honest timeout path under a
+  backward wall-clock step (Medium, availability) — FIXED.** `awaitWithDefault`
+  computes `remaining` from the wall clock but schedules `setTimeout` on the
+  monotonic clock, then the timer callback called `defaultResolution`, whose
+  CS-22 layer-1 guard re-reads the wall clock and throws when `Date.now() <
+  deadline`. If the wall clock stepped backward relative to the monotonic timer
+  after scheduling (NTP step-back, VM snapshot/resume, macOS `adjtime`), the
+  guard threw *inside the timer macrotask* — uncaught: process crash, or a
+  permanent hang if an `uncaughtException` handler was installed. It failed
+  *closed* (no early authorization, no forged record — the throw prevented any
+  mint), so it was availability-only, not a deadline bypass. Fix: split the
+  actual minting into an internal `mintDefault` that performs no wall-clock check
+  (the runtime timer firing is the authoritative "deadline reached" signal) and
+  stamps the receipt at `max(now, deadline)` so a genuine Default is never
+  stamped before the window it represents; the timer/expiry paths in
+  `awaitWithDefault` mint through it, while the public `defaultResolution` keeps
+  the guard for external callers. This also fixes a second facet: a Default
+  stamped at a backward wall clock would have been rejected by CS-22's own
+  `verifyResolution` timestamp gate at the end of the race. +2 tests.
+  Three refuted candidates (all verified to fail closed / out of scope): an
+  offline verifier accepting a future-timestamped forged default (grants the
+  authority-key holder nothing beyond the already-permitted key-compromise model,
+  since the approver branch has no time check either); the same backward-clock
+  divergence in the synchronous branches (settles as a *handled* fail-closed
+  rejection, no crash); and a "routine NTP slew" trigger (Linux disciplines
+  `CLOCK_MONOTONIC` and `CLOCK_REALTIME` from the same timekeeper, so only an
+  abnormal backward *step* — not slew — diverges them).

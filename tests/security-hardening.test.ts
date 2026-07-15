@@ -539,6 +539,55 @@ describe("the Default cannot fire early (Codex CS-22)", () => {
   });
 });
 
+describe("adapter faults and contradictory Defaults fail closed, never approve (Codex CS-28)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("a pre-deadline adapter REJECTION fails closed — never falls through to a default:approve", async () => {
+    vi.useFakeTimers();
+    const i = intent(1, { approvers: ["m:alice"], default: "approve" }); // silence would approve
+    let outcome = "pending";
+    void awaitWithDefault(i, Promise.reject(new Error("approval route failed")), authority.secretKey).then(
+      (r) => (outcome = `resolved:${r.decision}`),
+      () => (outcome = "rejected"),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(300_000 + 10); // let any Default timer fire
+    expect(outcome).toBe("rejected"); // a broken approval channel must NOT auto-approve
+  });
+
+  it("still resolves to the Default when the adapter simply stays silent (rejection != silence)", async () => {
+    vi.useFakeTimers();
+    const i = intent(1, { approvers: ["m:alice"], default: "reject" });
+    const pending = awaitWithDefault(i, new Promise<Resolution>(() => {}), authority.secretKey);
+    await vi.advanceTimersByTimeAsync(300_000 + 10);
+    const r = await pending;
+    expect(r.policy).toBe("default"); // genuine silence still yields the Default
+  });
+
+  it("does not swallow a contradictory early Default into an approval", async () => {
+    vi.useFakeTimers();
+    const i = intent(1, { approvers: ["m:alice"], default: "approve" }); // expected Default = approve
+    // An authority-signed default:timeout receipt that says REJECT contradicts this intent's
+    // Default. It must not be classified as an early-Default-to-discard and replaced with an
+    // approve at the deadline — it must reach verifyResolution and fail closed.
+    const contradictory: Resolution = {
+      decision: "reject",
+      policy: "default",
+      countersignatures: [signDecision(i, "reject", "default:timeout", authority.secretKey, "default")],
+    };
+    let outcome = "pending";
+    void awaitWithDefault(i, Promise.resolve(contradictory), authority.secretKey).then(
+      (r) => (outcome = `resolved:${r.decision}`),
+      () => (outcome = "rejected"),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(300_000 + 10);
+    expect(outcome).not.toBe("resolved:approve");
+  });
+});
+
 describe("the early-Default discard authenticates the receipt first (Codex CS-26)", () => {
   afterEach(() => vi.useRealTimers());
 

@@ -223,31 +223,45 @@ export async function awaitWithDefault(
   // event-loop stall) can never beat the timeout. A rejected adapter promise
   // never wins the race; the Default timer decides.
   const expectedAuthorityPublicKey = publicKeyFromSecret(authoritySecret);
+  // What the runtime itself would decide at the deadline — a multi-person quorum
+  // always fails closed to reject, otherwise the Intent's declared Default.
+  const expectedDefaultDecision: "approve" | "reject" = quorumOf(intent) > 1 ? "reject" : intent.default;
   const guarded: Promise<Resolution> = resolution.then(
     (r) => {
       if (Date.now() >= deadline(intent)) return mintDefault(intent, authoritySecret);
       // An adapter delivering a Default before the deadline is discarded so the
       // runtime's own timer mints the genuine one on time. Recognise that ONLY
-      // by AUTHENTICATING the receipt — a single default:timeout receipt for
-      // this intent, signed by the expected authority — never by an unverified
-      // `policy` field. Otherwise a forged/foreign receipt whose raw policy
-      // reads "default" could suppress a real human decision (e.g. drop a veto,
-      // letting a default:"approve" timer approve). Anything that is not an
-      // authenticated Default delivery falls through to verifyResolution, which
-      // fails closed on the contaminant. This also ignores the attacker-set
+      // when the receipt is EXACTLY what the runtime would mint at the deadline:
+      // a single default:timeout receipt for this intent, signed by the expected
+      // authority, whose decision matches the Intent's own Default. Never trust
+      // an unverified `policy` field, and never discard a receipt that merely
+      // looks default-shaped but CONTRADICTS the Default (wrong decision) or is
+      // forged/foreign — that would let a bogus "default" suppress the real
+      // decision and hand the timer an approval (CS-26, CS-28). Anything that is
+      // not an authenticated, decision-consistent Default falls through to
+      // verifyResolution and fails closed. This also ignores the attacker-set
       // Resolution.policy wrapper entirely (CS-24).
       const receipts = (r as Resolution | null)?.countersignatures;
       const isEarlyDefaultDelivery =
         Array.isArray(receipts) &&
         receipts.length === 1 &&
         receipts[0]?.policy === "default" &&
+        receipts[0].decision === expectedDefaultDecision &&
         receipts[0].intent_id === intent.intent_id &&
         normalizeActor(receipts[0].actor) === DEFAULT_TIMEOUT_ACTOR &&
         verifyCountersignature(receipts[0], { trustedKeys: expectedAuthorityPublicKey });
       if (isEarlyDefaultDelivery) return new Promise<Resolution>(() => {});
       return r;
     },
-    () => new Promise<Resolution>(() => {}),
+    (err) => {
+      // An adapter ERROR is not silence. Before the deadline it means the review
+      // channel failed while the window was still open — never fall through to the
+      // timer, which would auto-approve a default:"approve" Intent on a broken
+      // channel. Fail closed. Past the deadline the Default has already decided
+      // (spec §4), so a late error is moot — yield the Default. (CS-28)
+      if (Date.now() >= deadline(intent)) return mintDefault(intent, authoritySecret);
+      throw err instanceof Error ? err : new CountersignError(`adapter resolution failed for ${intent.intent_id}`);
+    },
   );
 
   const remaining = deadline(intent) - Date.now();

@@ -433,6 +433,43 @@ describe("webhook authentication is enforced before any payload is trusted", () 
     }
   });
 
+  it("discord: an interaction this instance does not track does not strip the buttons (CS-28)", async () => {
+    // A click can arrive before awaitResolution registers the entry (deliver runs first in
+    // wrapAction) or on another process-local instance. `!has()` must NOT be treated as
+    // "closed" and strip the approver's buttons — that would grief the request.
+    interceptFetch(() => ({ id: "msg1" }));
+    const appKey = generateKeypair();
+    const adapter = new DiscordAdapter({
+      botToken: "t",
+      channelId: "c",
+      publicKey: fromB64url(appKey.publicKey).toString("hex"),
+      authorityKey: authority.secretKey,
+    });
+    const { server, base } = await listen(adapter.interactionHandler());
+    try {
+      const intent = makeIntent(["discord:approver"]); // never registered via awaitResolution
+      const body = JSON.stringify({
+        type: 3,
+        data: { custom_id: `cs:${intent.intent_id}:approve` },
+        member: { user: { id: "approver" } },
+        message: { content: "intent", components: [{ type: 1, components: [{ type: 2 }] }] },
+      });
+      const ts = String(Math.floor(Date.now() / 1000));
+      const sig = fromB64url(signBytes(appKey.secretKey, utf8(ts + body))).toString("hex");
+      const res = await fetch(base, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-signature-ed25519": sig, "x-signature-timestamp": ts },
+        body,
+      });
+      const out = await res.json();
+      expect(out.data?.components ?? null).not.toEqual([]); // buttons NOT stripped
+      expect(JSON.stringify(out)).not.toMatch(/Resolved/i);
+    } finally {
+      server.close();
+      adapter.close();
+    }
+  });
+
   it("whatsapp: answers the GET verification challenge only for the right token", async () => {
     const adapter = new WhatsAppAdapter({
       accessToken: "t",

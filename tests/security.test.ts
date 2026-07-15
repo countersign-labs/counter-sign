@@ -74,7 +74,7 @@ describe("authority binding — integrity is not authority", () => {
     const good: Promise<Resolution> = Promise.resolve({
       decision: "approve",
       policy: "approver",
-      countersignatures: [signDecision(intent, "approve", "email:ops", authority.secretKey)],
+      countersignatures: [signDecision(intent, "approve", "someone", authority.secretKey)],
     });
     const resolution = await awaitWithDefault(intent, good, authority.secretKey);
     expect(resolution.decision).toBe("approve");

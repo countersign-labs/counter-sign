@@ -33,13 +33,13 @@ const validateCs = ajv.compile(
 const authority = generateKeypair();
 const agent = { id: "agent:test", keypair: generateKeypair() };
 
-function makeIntent(): Intent {
+function makeIntent(approvers: string[] = ["someone"]): Intent {
   return createIntent(
     {
       action: "demo.op",
       summary: "Do the thing",
       risk_tier: "medium",
-      approvers: ["someone"],
+      approvers,
       timeout: 300,
       default: "reject",
     },
@@ -78,6 +78,8 @@ interface Case {
     /** Simulate the human approving through the platform's real callback path. */
     approve(intent: Intent): Promise<void>;
     expectedActorPrefix: string;
+    /** the exact actor identity this case will produce — must be a named approver */
+    approver: string;
     teardown(): Promise<void> | void;
   }>;
 }
@@ -99,6 +101,7 @@ const cases: Case[] = [
       return {
         adapter,
         expectedActorPrefix: "telegram:",
+        approver: "telegram:42",
         approve: async (intent) => {
           await fetch(`${base}/`, {
             method: "POST",
@@ -134,6 +137,7 @@ const cases: Case[] = [
       return {
         adapter,
         expectedActorPrefix: "discord:",
+        approver: "discord:u42",
         approve: async (intent) => {
           const body = JSON.stringify({
             type: 3,
@@ -174,6 +178,7 @@ const cases: Case[] = [
       return {
         adapter,
         expectedActorPrefix: "slack:",
+        approver: "slack:U42",
         approve: async (intent) => {
           const payload = JSON.stringify({
             type: "block_actions",
@@ -216,6 +221,7 @@ const cases: Case[] = [
       return {
         adapter,
         expectedActorPrefix: "whatsapp:",
+        approver: "whatsapp:6591234567",
         approve: async (intent) => {
           const body = JSON.stringify({
             entry: [
@@ -264,6 +270,7 @@ const cases: Case[] = [
       return {
         adapter,
         expectedActorPrefix: "email:",
+        approver: "email:ops@countersign.local",
         approve: async () => {
           const text = sent[0]?.text ?? "";
           const approveUrl = text.match(/Approve: (\S+)/)?.[1];
@@ -291,9 +298,9 @@ afterEach(() => {
 
 describe.each(cases)("adapter conformance: $name ($pattern)", (c) => {
   it("delivers, then returns a schema-valid, signature-valid Resolution", async () => {
-    const { adapter, approve, expectedActorPrefix, teardown } = await c.make();
+    const { adapter, approve, expectedActorPrefix, approver, teardown } = await c.make();
     try {
-      const intent = makeIntent();
+      const intent = makeIntent([approver]);
       await adapter.deliver(intent);
 
       const pending = adapter.awaitResolution(intent);

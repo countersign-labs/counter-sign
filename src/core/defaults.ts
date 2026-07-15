@@ -78,8 +78,20 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
   // other policy. (Formerly, policy:"default" skipped quorum entirely.)
   if (resolution.decision === "approve") {
     if (resolution.policy === "approver") {
-      // A human quorum: `quorum` DISTINCT approvers (by canonical actor identity).
-      const distinct = new Set(receipts.map((cs) => normalizeActor(cs.actor)));
+      // A human quorum: `quorum` DISTINCT approvers, each of whom MUST be named in
+      // the Intent's signed `approvers` allowlist. Without this, any actor the
+      // trusted authority vouches for (e.g. any member of the delivery channel)
+      // could satisfy quorum — the signed `approvers` field would be decorative.
+      const allow = new Set(intent.approvers.map(normalizeActor));
+      const distinct = new Set<string>();
+      for (const cs of receipts) {
+        const actor = normalizeActor(cs.actor);
+        if (!allow.has(actor))
+          throw new InvalidCountersignatureError(
+            `approve resolution for ${intent.intent_id} has a receipt from ${cs.actor}, who is not in the Intent's approvers`,
+          );
+        distinct.add(actor);
+      }
       const need = quorumOf(intent);
       if (distinct.size < need)
         throw new InvalidCountersignatureError(

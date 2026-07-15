@@ -22,7 +22,9 @@ const server = createServer(adapter.interactivityHandler()).listen(port);
 console.log(`Interactivity endpoint listening on :${port} — make sure your public tunnel points here.`);
 
 try {
-  await runDemo(adapter, demoFields({ approvers: [`slack:${process.env.SLACK_CHANNEL_ID}`] }));
+  // The actor is the user who clicks (`slack:<user id>`), not the channel — set
+  // SLACK_APPROVER_ID to the approver's Slack user id (e.g. U024BE7LH).
+  await runDemo(adapter, demoFields({ approvers: [`slack:${process.env.SLACK_APPROVER_ID ?? "UYOURUSERID"}`] }));
 } finally {
   server.close();
 }

@@ -135,7 +135,7 @@ describe("wrapAction end-to-end under quorum", () => {
     action: "prod.deploy",
     summary: "Deploy 2.4.0",
     risk_tier: "critical",
-    approvers: ["m:alice", "m:bob"],
+    approvers: ["mock:alice", "mock:bob"],
     quorum: 2,
     timeout: 300,
     default: "reject",
@@ -253,7 +253,7 @@ describe("a real chat adapter accumulates a distinct-user quorum via its handler
     vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 }));
     try {
       const adapter = new TelegramAdapter({ botToken: "t", chatId: "1", authorityKey: authority.secretKey, mode: "webhook" });
-      const i = intent(2);
+      const i = intent(2, { approvers: ["telegram:10", "telegram:20"] });
       const pending = adapter.awaitResolution(i);
       const update = (uid: number, decision: string) => ({
         update_id: uid,

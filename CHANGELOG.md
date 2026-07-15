@@ -27,7 +27,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
   — the chain needs an anchored `head()`, and quorum is authority-enforced, not
   cryptographic separation of duty. Keyed self-anchoring log + per-approver-key
   quorum are on the v0.2 roadmap. See [docs/security-review.md](docs/security-review.md).
-- 14 regression tests encode each exploit. No wire-format change; v0.1.x receipts still verify.
+- **Adversarial second-engine review (Codex):** additionally (1) enforce that only
+  the Intent's signed `approvers` may decide — an unlisted channel member's click
+  is ignored, so membership is not authority; (2) fix a timeout-reaper race so
+  silence reliably yields the signed Default instead of throwing; (3) catch an
+  oversized Telegram webhook body (no unhandled rejection). Demos updated to name
+  the real approver identity.
+- Regression tests encode each exploit (117 total). No wire-format change; v0.1.x receipts still verify.
 
 ## [0.1.2] — 2026-07-09
 

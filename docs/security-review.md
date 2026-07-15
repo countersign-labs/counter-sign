@@ -205,3 +205,26 @@ formatting, key-sort by UTF-16 code unit, duplicate keys, NFC). Same-impl this
 is safe (fixed ASCII keys, bounded integers, re-canonicalizing verifiers). To be
 pinned normatively (RFC 8785 / JCS) before other-language implementations are
 relied upon.
+
+## Second-engine (Codex) adversarial review — FIXED
+
+After the five-front review above, the v0.1.2→v0.1.3 diff was re-reviewed by a
+different engine (OpenAI Codex, adversarial mode) as an independent check on the
+fixes. It confirmed the policy bypass was closed and found three further issues,
+all now fixed with regression tests in `tests/security-hardening.test.ts`:
+
+- **CS-14 · Named `approvers` were not enforced (High) — FIXED.** `verifyResolution`
+  counted any distinct signed actor without checking membership in the Intent's
+  signed `approvers`, so in a shared channel any authenticated member's click
+  could satisfy quorum. Now both `PendingDecisions.settle` (ignores an unlisted
+  actor's approve *and* veto) and `verifyResolution` (rejects a receipt from a
+  non-approver) enforce the allowlist under normalized identity.
+- **CS-15 · Timeout reaper could reject the arbitration promise (Medium) — FIXED.**
+  The deadline reaper rejected the same promise `awaitWithDefault` races against
+  its default timer; at an equal deadline the reaper (registered first) could make
+  the race reject instead of resolving to the signed Default. The reaper now evicts
+  the entry without rejecting.
+- **CS-16 · Telegram webhook lacked an outer error handler (Medium) — FIXED.** The
+  new `readBody` cap threw into a `void`-launched handler with no `.catch`, risking
+  an unhandled rejection on an oversized body. Added the outer catch the other
+  adapters already had.

@@ -45,17 +45,19 @@ const smtp = await startDebugSmtp(SMTP_PORT, (mail) => {
   })();
 });
 
+const to = process.env.EMAIL_TO ?? "you@countersign.local";
 const adapter = new EmailAdapter({
   smtpUrl: process.env.SMTP_URL ?? `smtp://127.0.0.1:${SMTP_PORT}`,
   from: process.env.EMAIL_FROM ?? "approvals@countersign.local",
-  to: process.env.EMAIL_TO ?? "you@countersign.local",
+  to,
   callbackBaseUrl: process.env.EMAIL_CALLBACK_BASE_URL ?? `http://127.0.0.1:${CALLBACK_PORT}`,
   // authorityKey resolved from COUNTERSIGN_AUTHORITY_KEY — the same key the shim uses.
 });
 const callbackServer = adapter.createServer().listen(CALLBACK_PORT, "127.0.0.1");
 
 try {
-  await runDemo(adapter, demoFields({ approvers: ["email:you@countersign.local"], timeout: manual ? 300 : 60 }));
+  // The single recipient IS the approver, so the named approver must be `email:<to>`.
+  await runDemo(adapter, demoFields({ approvers: [`email:${to}`], timeout: manual ? 300 : 60 }));
 } finally {
   callbackServer.close();
   smtp.close();

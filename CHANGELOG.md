@@ -7,6 +7,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-07-15
+
 ### Security
 - **Fixed an authorization bypass (BLOCKER):** `verifyResolution` gated its
   quorum check on the attacker-supplied `resolution.policy`, so a `policy:"default"`
@@ -109,7 +111,8 @@ First public draft of the protocol and reference implementation.
 - Code: Apache-2.0. Specification text: CC BY 4.0 (vendored as
   `LICENSE-CC-BY-4.0.txt`).
 
-[Unreleased]: https://github.com/countersign-labs/counter-sign/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/countersign-labs/counter-sign/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/countersign-labs/counter-sign/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/countersign-labs/counter-sign/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/countersign-labs/counter-sign/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/countersign-labs/counter-sign/releases/tag/v0.1.0

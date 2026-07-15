@@ -448,3 +448,17 @@ real fail-open paths (all fixed under CS-28):
 +4 tests (148 total). These closed the "error/unknown ≠ silence" class the
 adversarial reviewer identified; a genuine never-settling adapter still yields the
 Default on time, and a real early human veto still wins immediately.
+
+- **CS-28d · The CS-28a rejection handler could orphan a promise into an unhandled
+  rejection (Low, robustness) — FIXED.** An adversarial re-review of the CS-28 fix
+  noted that because CS-28a's rejection handler can now `throw` (fail closed), and
+  `guarded` was wired up *before* the far-future-deadline guard, a hostile wire
+  Intent (far-future `created_at`, the CS-20 case) plus a rejecting adapter promise
+  would orphan `guarded` — surfacing as an unhandled rejection, which crashes the
+  process on modern Node. Same class as CS-16. Fixed by hoisting the far-future
+  guard ahead of `guarded`'s creation and defensively consuming the caller's
+  promise (`resolution.catch(() => {})`) so a rejecting adapter can never leak on
+  any early-validation throw. Now fails closed with a `CountersignError` and no
+  unhandled rejection. +1 test (149 total). A subsequent 3-lens adversarial audit
+  of the whole CS-28 change set (fail-closed rejection path, decision-consistent
+  classifier, adapter UI lifecycle across all channels) returned clean.

@@ -216,6 +216,23 @@ export async function awaitWithDefault(
   // immediately), silently erasing the human veto. Fail closed on a bad Intent.
   assertIntentInvariants(intent);
 
+  // Consume the caller's adapter promise unconditionally as a safety net: a
+  // rejecting adapter must NEVER leak as an unhandled rejection (a process crash
+  // on modern Node) if a synchronous check below throws before the promise is
+  // wired into the race. The real handling still happens in `guarded`.
+  void resolution.catch(() => {});
+
+  // Compute the deadline window and reject a far-future Intent BEFORE wiring up
+  // `guarded`: its CS-28 rejection handler can throw, so orphaning it here (by
+  // failing closed after it was created) would surface as an unhandled rejection.
+  const remaining = deadline(intent) - Date.now();
+  // A far-future (but parseable) created_at makes `remaining` exceed Node's timer
+  // ceiling; setTimeout would clamp it to ~1 ms and fire the Default immediately,
+  // collapsing the review window (an auto-approve for default:"approve"). No
+  // legitimate window is that long — timeout is bounded to ~24.8 days — so refuse.
+  if (remaining > MAX_TIMER_MS)
+    throw new CountersignError(`intent ${intent.intent_id} has an implausibly far-future deadline`);
+
   // Guard the adapter's resolution at the CORE level — not only in the shipped
   // PendingDecisions helper — so the deadline rule holds for ANY Adapter: a
   // decision OBSERVED at/after the deadline is discarded in favor of the Default,
@@ -264,13 +281,6 @@ export async function awaitWithDefault(
     },
   );
 
-  const remaining = deadline(intent) - Date.now();
-  // A far-future (but parseable) created_at makes `remaining` exceed Node's timer
-  // ceiling; setTimeout would clamp it to ~1 ms and fire the Default immediately,
-  // collapsing the review window (an auto-approve for default:"approve"). No
-  // legitimate window is that long — timeout is bounded to ~24.8 days — so refuse.
-  if (remaining > MAX_TIMER_MS)
-    throw new CountersignError(`intent ${intent.intent_id} has an implausibly far-future deadline`);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const winner =

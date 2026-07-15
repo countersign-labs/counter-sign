@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { canonicalize } from "./canonical.js";
 import { normalizeActor } from "./countersignature.js";
 import { CountersignError } from "./errors.js";
-import { signContext, verifyContext, type Keypair } from "./keys.js";
+import { isCanonicalPublicKey, signContext, verifyContext, type Keypair } from "./keys.js";
 import { COUNTERSIGN_VERSION, INTENT_CONTEXT, type Approver, type Intent, type IntentFields } from "./types.js";
 
 export interface AgentIdentity {
@@ -49,6 +49,11 @@ function validateApprovers(approvers: Approver[], quorum: number): void {
     if (a.mode === "keyed") {
       if (typeof a.public_key !== "string" || a.public_key.length === 0)
         throw new CountersignError(`keyed approver ${a.actor} must carry a public_key`);
+      // Require the CANONICAL base64url encoding of a 32-byte key, so the exact-string
+      // distinctness check below is sound — two encodings of ONE key must not fill two
+      // quorum slots (that would break separation of duty).
+      if (!isCanonicalPublicKey(a.public_key))
+        throw new CountersignError(`keyed approver ${a.actor} has a non-canonical or malformed public_key`);
       if (keys.has(a.public_key))
         throw new CountersignError(`approver public_key ${a.public_key} is used by more than one approver`);
       keys.add(a.public_key);

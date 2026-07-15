@@ -13,7 +13,7 @@ import { signDecision } from "../src/core/countersignature.js";
 import { verifyResolution } from "../src/core/defaults.js";
 import { InvalidCountersignatureError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
-import { generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
+import { fromB64url, generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
 import type { Approver, Intent, Resolution } from "../src/core/types.js";
 
 const agent = { id: "agent:test", keypair: generateKeypair() };
@@ -105,6 +105,38 @@ describe("keyed quorum — negative (a compromised authority key cannot forge it
       signDecision(i, "approve", "m:bob", alice.secretKey, "approver"),
     ]);
     expect(() => verifyResolution(i, forged, authPub)).toThrow(InvalidCountersignatureError);
+  });
+
+  it("rejects a non-canonical base64url key twin (one key cannot fill two slots via encodings)", () => {
+    // Find a DIFFERENT base64url string that decodes to the SAME 32-byte key.
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const bytes = fromB64url(alice.publicKey);
+    let twin = "";
+    for (const c of alphabet) {
+      const cand = alice.publicKey.slice(0, -1) + c;
+      if (cand !== alice.publicKey && fromB64url(cand).length === 32 && fromB64url(cand).equals(bytes)) { twin = cand; break; }
+    }
+    expect(twin).not.toBe("");
+    expect(twin).not.toBe(alice.publicKey);
+    // A non-canonical key is refused outright, so it cannot be bound as a second
+    // "distinct" approver sharing alice's underlying key.
+    expect(() =>
+      createIntent(
+        { action: "a", summary: "s", risk_tier: "low",
+          approvers: [keyed("m:alice", alice), { actor: "m:bob", mode: "keyed", public_key: twin }],
+          quorum: 2, timeout: 60, default: "reject" },
+        agent,
+      ),
+    ).toThrow(/non-canonical/);
+  });
+
+  it("rejects a keyed approver bound to the AUTHORITY key (would degrade separation of duty)", () => {
+    const i = createIntent(
+      { action: "a", summary: "s", risk_tier: "low", approvers: [{ actor: "m:alice", mode: "keyed", public_key: authPub }], quorum: 1, timeout: 60, default: "reject" },
+      agent,
+    );
+    const r = res("approve", [signDecision(i, "approve", "m:alice", authority.secretKey, "approver")]);
+    expect(() => verifyResolution(i, r, authPub)).toThrow(/authority key/);
   });
 
   it("createIntent refuses a keyed approver without a key, and duplicate keyed keys", () => {

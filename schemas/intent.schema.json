@@ -81,9 +81,9 @@
               "actor": { "type": "string", "minLength": 1 },
               "mode": { "const": "keyed" },
               "public_key": {
-                "description": "base64url raw ed25519 (or COSE, from Phase 2) public key.",
+                "description": "base64url raw 32-byte ed25519 public key (43 chars, no padding). Canonicality is additionally enforced in code.",
                 "type": "string",
-                "minLength": 1
+                "pattern": "^[A-Za-z0-9_-]{43}$"
               }
             }
           }

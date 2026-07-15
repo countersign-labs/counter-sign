@@ -1,10 +1,10 @@
 {
   "countersign": "0.2",
-  "intent_id": "c48f97ed-2f67-4abe-ae54-daf87c616511",
+  "intent_id": "11256e54-58ed-4a5c-9b55-e616de5ffdab",
   "decision": "approve",
   "actor": "slack:U024BE7LH",
   "policy": "approver",
-  "timestamp": "2026-07-15T22:23:18.896Z",
-  "public_key": "zt6SKY1OHMdSM0LMHuMxI8-fCb-V_XgZiJmYYQl-mq0",
-  "signature": "xFqM-FDfPvqIanuU7xIUHdVPE4MVC6zNDGVWiLh-GqWLcqKU8KEVmLVidycuTZg4xcUl94VT_u-qODbch0fVAQ"
+  "timestamp": "2026-07-15T22:38:48.676Z",
+  "public_key": "I78ma0k8e3NMfF2Xmxpsm3549qbPRIVzVIfPPH7xRwA",
+  "signature": "tDNrCGfrzW6C32VWLQscMBZlgt9SvAKorJlbgviRxIqZnYmDjjTTOc_fZD0RdrHDlslrSF9DJX-V9Fs873-VBg"
 }

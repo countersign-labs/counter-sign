@@ -21,20 +21,48 @@ export function isExpired(intent: Intent, now: number = Date.now()): boolean {
 }
 
 /**
- * The Resolution produced when nobody completed the quorum in time: the
- * Intent's declared Default, signed by the enforcing runtime. Silence is
- * never ambiguous — this receipt is as explicit as a human decision.
+ * Mint the timeout Default receipt — the Resolution produced when nobody
+ * completed the quorum in time: the Intent's declared Default, signed by the
+ * enforcing runtime. Silence is never ambiguous; this receipt is as explicit
+ * as a human decision.
+ *
+ * INTERNAL: the caller MUST have already
+ * established that the deadline is reached (the runtime timer fired, or the
+ * Intent was observed already-expired). It performs no wall-clock check, so it
+ * never throws on the honest timeout path — the timer firing is the
+ * authoritative "deadline reached" signal, robust to a wall clock that has
+ * stepped backward relative to the monotonic timer after scheduling.
+ *
+ * The receipt is stamped at `max(now, deadline)`, never before the deadline it
+ * represents: a Default fires AT the deadline, so even if the wall clock reads
+ * earlier (NTP step-back, VM resume), the record is honest and passes the
+ * `verifyResolution` timestamp gate.
  */
-export function defaultResolution(intent: Intent, authoritySecret: string): Resolution {
+function mintDefault(intent: Intent, authoritySecret: string): Resolution {
   // A multi-person quorum always fails closed on timeout: silence must never
   // authorize an action that required distinct approvers, even if a
   // non-conforming Intent declared default: approve.
   const decision = quorumOf(intent) > 1 ? "reject" : intent.default;
+  const stamp = new Date(Math.max(Date.now(), deadline(intent))).toISOString();
   return {
     decision,
     policy: "default",
-    countersignatures: [signDecision(intent, decision, "default:timeout", authoritySecret, "default")],
+    countersignatures: [signDecision(intent, decision, "default:timeout", authoritySecret, "default", stamp)],
   };
+}
+
+/**
+ * The timeout Default as a signed Resolution. Refuses to mint before the
+ * deadline (fail closed): an early Default would fabricate a timeout that has
+ * not happened — a false "nobody responded" record, or an approval before the
+ * review window closed. The enforcing runtime's own timer path mints via the
+ * internal `mintDefault` instead, so this guard protects EXTERNAL callers
+ * without being able to throw on the honest timeout path.
+ */
+export function defaultResolution(intent: Intent, authoritySecret: string): Resolution {
+  if (Date.now() < deadline(intent))
+    throw new CountersignError(`intent ${intent.intent_id} has not reached its deadline — the Default cannot fire early`);
+  return mintDefault(intent, authoritySecret);
 }
 
 /**
@@ -124,6 +152,14 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
       throw new InvalidCountersignatureError(
         `a default resolution for ${intent.intent_id} must be exactly one default:timeout receipt`,
       );
+    // The Default fires AT the deadline, so its signed timestamp can never
+    // precede it. Without this, an early-minted "timeout" receipt verifies —
+    // a false timeout audit record, or an approval before the review window
+    // closed. The negated comparison also fails an unparseable timestamp.
+    if (!(Date.parse(receipts[0].timestamp) >= deadline(intent)))
+      throw new InvalidCountersignatureError(
+        `a default resolution for ${intent.intent_id} is timestamped before the Intent's deadline — the Default cannot fire early`,
+      );
   } else {
     throw new InvalidCountersignatureError(
       `resolution for ${intent.intent_id} has an unrecognized policy ${JSON.stringify(resolution.policy)}`,
@@ -169,7 +205,16 @@ export async function awaitWithDefault(
   // event-loop stall) can never beat the timeout. A rejected adapter promise
   // never wins the race; the Default timer decides.
   const guarded: Promise<Resolution> = resolution.then(
-    (r) => (Date.now() >= deadline(intent) ? defaultResolution(intent, authoritySecret) : r),
+    (r) => {
+      if (Date.now() >= deadline(intent)) return mintDefault(intent, authoritySecret);
+      // A Default is minted by the enforcing runtime AT the deadline. An
+      // adapter-supplied policy:"default" arriving before it is a fabricated
+      // timeout — even a forged future timestamp (signable by anyone holding
+      // the authority key) must not close the review window early. Discard it
+      // like a rejected promise; the timer mints the genuine Default on time.
+      if ((r as Resolution | null)?.policy === "default") return new Promise<Resolution>(() => {});
+      return r;
+    },
     () => new Promise<Resolution>(() => {}),
   );
 
@@ -184,11 +229,15 @@ export async function awaitWithDefault(
 
   const winner =
     remaining <= 0
-      ? defaultResolution(intent, authoritySecret)
+      ? mintDefault(intent, authoritySecret)
       : await Promise.race([
           guarded,
+          // The timer fires on the monotonic clock after `remaining` ms: that IS
+          // the deadline being reached, so mint unconditionally. Re-checking the
+          // wall clock here (as defaultResolution does) would throw in this
+          // callback — uncaught — if the wall clock stepped backward meanwhile.
           new Promise<Resolution>((resolve) => {
-            timer = setTimeout(() => resolve(defaultResolution(intent, authoritySecret)), remaining);
+            timer = setTimeout(() => resolve(mintDefault(intent, authoritySecret)), remaining);
           }),
         ]).finally(() => clearTimeout(timer));
 

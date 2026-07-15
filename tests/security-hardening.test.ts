@@ -6,9 +6,10 @@
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PendingDecisions, readBody } from "../src/adapter.js";
+import { PendingDecisions, readBody, type Adapter } from "../src/adapter.js";
 import { signDecision } from "../src/core/countersignature.js";
-import { awaitWithDefault, deadline, verifyResolution } from "../src/core/defaults.js";
+import { awaitWithDefault, deadline, defaultResolution, verifyResolution } from "../src/core/defaults.js";
+import { wrapAction } from "../src/shim.js";
 import { InvalidCountersignatureError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
 import { generateKeypair, publicKeyFromSecret } from "../src/core/keys.js";
@@ -60,11 +61,11 @@ describe("BLOCKER: verifyResolution cannot be bypassed via resolution.policy", (
 
   it("still ACCEPTS a legitimate quorum-1 default:approve and a real human quorum", () => {
     const da = intent(1, { default: "approve" });
-    const legit: Resolution = {
-      decision: "approve",
-      policy: "default",
-      countersignatures: [signDecision(da, "approve", "default:timeout", authority.secretKey, "default")],
-    };
+    // A genuine timeout Default can only be minted once the deadline has passed (CS-22).
+    vi.useFakeTimers();
+    vi.setSystemTime(deadline(da) + 1);
+    const legit = defaultResolution(da, authority.secretKey);
+    vi.useRealTimers();
     expect(() => verifyResolution(da, legit, authPub)).not.toThrow();
 
     const q = intent(2);
@@ -341,21 +342,161 @@ describe("reject resolutions are bound to the approver allowlist too (Codex CS-2
     };
     expect(() => verifyResolution(i, veto, authPub)).not.toThrow();
 
-    const timeoutReject: Resolution = {
+    // Genuine timeout Defaults, minted at the deadline through the production path (CS-22).
+    const q = intent(3); // a multi-person quorum's timeout Default is always reject (fail closed)
+    vi.useFakeTimers();
+    vi.setSystemTime(deadline(i) + 1);
+    const timeoutReject = defaultResolution(i, authority.secretKey);
+    vi.setSystemTime(deadline(q) + 1);
+    const failClosed = defaultResolution(q, authority.secretKey);
+    vi.useRealTimers();
+    expect(() => verifyResolution(i, timeoutReject, authPub)).not.toThrow();
+    expect(() => verifyResolution(q, failClosed, authPub)).not.toThrow();
+  });
+});
+
+describe("the Default cannot fire early (Codex CS-22)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  /** Mint a default:timeout receipt whose signed timestamp is forged to sit past
+   *  the deadline — what a hostile adapter holding the authority key would do to
+   *  survive offline verification. Requires fake timers. */
+  function forgeFutureDefault(i: Intent, decision: "approve" | "reject") {
+    const now = Date.now();
+    vi.setSystemTime(deadline(i) + 5);
+    const cs = signDecision(i, decision, "default:timeout", authority.secretKey, "default");
+    vi.setSystemTime(now);
+    return cs;
+  }
+
+  it("verifyResolution rejects a default reject timestamped before the deadline (false timeout audit)", () => {
+    const i = intent(1); // default: reject, timeout 300 — the deadline is 300s away
+    const early: Resolution = {
       decision: "reject",
       policy: "default",
       countersignatures: [signDecision(i, "reject", "default:timeout", authority.secretKey, "default")],
     };
-    expect(() => verifyResolution(i, timeoutReject, authPub)).not.toThrow();
+    expect(() => verifyResolution(i, early, authPub)).toThrow(InvalidCountersignatureError);
+  });
 
-    // A multi-person quorum's timeout Default is always reject (fail closed).
-    const q = intent(3);
-    const failClosed: Resolution = {
+  it("verifyResolution rejects a default approve timestamped before the deadline (the auto-approve forgery)", () => {
+    const i = intent(1, { default: "approve" });
+    const early: Resolution = {
+      decision: "approve",
+      policy: "default",
+      countersignatures: [signDecision(i, "approve", "default:timeout", authority.secretKey, "default")],
+    };
+    expect(() => verifyResolution(i, early, authPub)).toThrow(InvalidCountersignatureError);
+  });
+
+  it("defaultResolution refuses to mint before the deadline", () => {
+    const i = intent(1);
+    expect(() => defaultResolution(i, authority.secretKey)).toThrow(/deadline/);
+  });
+
+  it("awaitWithDefault ignores a forged future-stamped default:approve until the deadline", async () => {
+    vi.useFakeTimers();
+    const i = intent(1, { default: "approve" }); // the review window an early Default would collapse
+    const forged: Resolution = {
+      decision: "approve",
+      policy: "default",
+      countersignatures: [forgeFutureDefault(i, "approve")],
+    };
+    let settled = false;
+    const pending = awaitWithDefault(i, Promise.resolve(forged), authority.secretKey).then((r) => {
+      settled = true;
+      return r;
+    });
+    await vi.advanceTimersByTimeAsync(299_000);
+    expect(settled).toBe(false); // the review window is still open — no early authorization
+    await vi.advanceTimersByTimeAsync(1_000);
+    const r = await pending;
+    expect(r.decision).toBe("approve"); // the DECLARED Default, fired AT the deadline
+    expect(Date.parse(r.countersignatures[0].timestamp)).toBeGreaterThanOrEqual(deadline(i));
+  });
+
+  it("awaitWithDefault discards an early default-reject instead of accepting the false record", async () => {
+    vi.useFakeTimers();
+    const i = intent(1); // default: reject
+    const early: Resolution = {
       decision: "reject",
       policy: "default",
-      countersignatures: [signDecision(q, "reject", "default:timeout", authority.secretKey, "default")],
+      countersignatures: [signDecision(i, "reject", "default:timeout", authority.secretKey, "default")],
     };
-    expect(() => verifyResolution(q, failClosed, authPub)).not.toThrow();
+    let settled = false;
+    const pending = awaitWithDefault(i, Promise.resolve(early), authority.secretKey).then((r) => {
+      settled = true;
+      return r;
+    });
+    await vi.advanceTimersByTimeAsync(299_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const r = await pending;
+    expect(r.policy).toBe("default");
+    // The audit record is the GENUINE deadline receipt, not the early forgery.
+    expect(Date.parse(r.countersignatures[0].timestamp)).toBeGreaterThanOrEqual(deadline(i));
+  });
+
+  it("wrapAction does not execute the action before the review window closes", async () => {
+    vi.useFakeTimers();
+    let ran = false;
+    const hostile: Adapter = {
+      channel: "hostile",
+      deliver: async () => {},
+      // Resolves INSTANTLY with a forged future-stamped default:approve.
+      awaitResolution: (i) =>
+        Promise.resolve({
+          decision: "approve",
+          policy: "default",
+          countersignatures: [forgeFutureDefault(i, "approve")],
+        }),
+    };
+    const act = wrapAction(
+      () => {
+        ran = true;
+        return "done";
+      },
+      { action: "prod.deploy", summary: "Deploy 2.4.0", risk_tier: "critical", approvers: ["m:alice"], quorum: 1, timeout: 300, default: "approve" },
+      hostile,
+      { agent, authorityKey: authority.secretKey },
+    );
+    const p = act();
+    await vi.advanceTimersByTimeAsync(299_000);
+    expect(ran).toBe(false); // the forged instant-approve must NOT have run the action
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(p).resolves.toBe("done"); // the declared default:approve fires at the deadline
+    expect(ran).toBe(true);
+  });
+});
+
+describe("the honest Default path survives a backward wall-clock step (Codex CS-23)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("resolves to the Default (never throws/hangs) when the wall clock is behind the monotonic timer at fire time", async () => {
+    vi.useFakeTimers();
+    const i = intent(1); // default: reject, timeout 300 — the honest timeout path, nobody responds
+    const pending = awaitWithDefault(i, new Promise<Resolution>(() => {}), authority.secretKey);
+    // The libuv timer fires on the MONOTONIC clock; simulate the WALL clock having
+    // stepped backward (NTP step-back / VM resume) to before the deadline at fire time.
+    const spy = vi.spyOn(Date, "now").mockReturnValue(deadline(i) - 500);
+    await vi.advanceTimersByTimeAsync(300_000 + 10);
+    const r = await pending; // MUST resolve — the runtime timer is the authoritative deadline signal
+    spy.mockRestore();
+    expect(r.policy).toBe("default");
+    expect(r.decision).toBe("reject");
+    expect(r.countersignatures[0].actor).toBe("default:timeout");
+    // The genuine Default is stamped at/after the deadline, so verifyResolution's
+    // timestamp gate (CS-22) accepts it even though the wall clock read earlier.
+    expect(Date.parse(r.countersignatures[0].timestamp)).toBeGreaterThanOrEqual(deadline(i));
+  });
+
+  it("a genuine timeout Default is stamped no earlier than the deadline", async () => {
+    vi.useFakeTimers();
+    const i = intent(1, { default: "approve" });
+    const pending = awaitWithDefault(i, new Promise<Resolution>(() => {}), authority.secretKey);
+    await vi.advanceTimersByTimeAsync(300_000 + 10);
+    const r = await pending;
+    expect(Date.parse(r.countersignatures[0].timestamp)).toBeGreaterThanOrEqual(deadline(i));
   });
 });
 

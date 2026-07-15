@@ -48,6 +48,12 @@ export function signDecision(
   actor: string,
   authoritySecret: string,
   policy: Policy = "approver",
+  /**
+   * ISO 8601 time the decision was made. Defaults to now. The timeout Default
+   * overrides this with the deadline itself, so its receipt is never stamped
+   * before the window it represents even if the wall clock has drifted back.
+   */
+  timestamp: string = new Date().toISOString(),
 ): Countersignature {
   const unsigned = {
     countersign: COUNTERSIGN_VERSION,
@@ -55,7 +61,7 @@ export function signDecision(
     decision,
     actor,
     policy,
-    timestamp: new Date().toISOString(),
+    timestamp,
     public_key: publicKeyFromSecret(authoritySecret),
   };
   const signature = signContext(authoritySecret, COUNTERSIGNATURE_CONTEXT, canonicalize(unsigned));

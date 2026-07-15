@@ -1,10 +1,10 @@
 {
   "countersign": "0.1",
-  "intent_id": "9ae0ba3b-257f-404e-91a5-59336bffb6dc",
+  "intent_id": "16f911ac-da2d-4444-be55-3eb168010b81",
   "decision": "reject",
   "actor": "email:ops@example.com",
   "policy": "approver",
-  "timestamp": "2026-07-07T15:07:55.677Z",
-  "public_key": "gW25D8fwhjTr4Sw_rmSOgLAVPzNwnvUjFQODUjLIyB4",
-  "signature": "3F3xYjeDOEoFhg8TIpMi6XD2OiRl-g0tNyeIwdmAeXQbG9kw6WTxkzmIAJ4MOykv70OqTeJyaCh93_qxzTYPAQ"
+  "timestamp": "2026-07-15T17:32:42.614Z",
+  "public_key": "AiVV-LjP0rn16fLCtpcozjKednsJ_ht0gzWlUGJXQzs",
+  "signature": "SXWe2pBXPDFTLSKekfNKz0_r4L0sS-TUzglnd8kRV5pU6C8A3YpsrJZFSyrpMlXBbaXycZM3KfhXB57KP1wvCA"
 }

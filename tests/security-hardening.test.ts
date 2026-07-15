@@ -227,6 +227,21 @@ describe("only named approvers can decide (Codex #1)", () => {
   });
 });
 
+describe("settle keeps parity with verifyResolution's reserved-actor rule (Codex CS-24)", () => {
+  it("ignores an actor of default:timeout even if a hostile Intent lists it as an approver", () => {
+    // A hostile agent-signed Intent that names the reserved Default actor as an approver.
+    const i = intent(1, { approvers: ["m:alice", "default:timeout"], default: "approve" });
+    const pd = new PendingDecisions();
+    void pd.wait(i);
+    // settle must NOT let the reserved actor decide — parity with verifyResolution's choke-point check.
+    expect(pd.settle(i.intent_id, "approve", "default:timeout", authority.secretKey)).toBeNull();
+    // A normalized variant is refused too (same normalizeActor folding).
+    expect(pd.settle(i.intent_id, "approve", "Default:Timeout ", authority.secretKey)).toBeNull();
+    // A genuinely listed human still decides.
+    expect(pd.settle(i.intent_id, "approve", "m:alice", authority.secretKey)?.status).toBe("resolved");
+  });
+});
+
 describe("a decision processed after the deadline is ignored (Codex re-review)", () => {
   afterEach(() => vi.useRealTimers());
   it("settle rejects a late approval even if the reaper timer is overdue (event-loop stall)", () => {
@@ -387,6 +402,61 @@ describe("the Default cannot fire early (Codex CS-22)", () => {
       countersignatures: [signDecision(i, "approve", "default:timeout", authority.secretKey, "default")],
     };
     expect(() => verifyResolution(i, early, authPub)).toThrow(InvalidCountersignatureError);
+  });
+
+  it("verifyResolution requires every approver receipt's signed policy to be approver", () => {
+    const i = intent(2);
+    const relabelled: Resolution = {
+      decision: "approve",
+      policy: "approver",
+      countersignatures: [
+        signDecision(i, "approve", "m:alice", authority.secretKey, "approver"),
+        signDecision(i, "approve", "m:bob", authority.secretKey, "default"),
+      ],
+    };
+    expect(() => verifyResolution(i, relabelled, authPub)).toThrow(/signed policy.*not "approver"/);
+  });
+
+  it("verifyResolution never treats default:timeout as an approver, even when the Intent lists it", () => {
+    const i = intent(1, { approvers: ["  DEFAULT:TIMEOUT  "] });
+    const forged: Resolution = {
+      decision: "approve",
+      policy: "approver",
+      countersignatures: [signDecision(i, "approve", "default:timeout", authority.secretKey, "approver")],
+    };
+    expect(() => verifyResolution(i, forged, authPub)).toThrow(/reserved actor default:timeout/);
+  });
+
+  it("a relabelled signed Default cannot win awaitWithDefault before the deadline", async () => {
+    vi.useFakeTimers();
+    const i = intent(1, { approvers: ["default:timeout"], default: "approve" });
+    const relabelled: Resolution = {
+      decision: "approve",
+      policy: "approver",
+      countersignatures: [forgeFutureDefault(i, "approve")],
+    };
+    expect(() => verifyResolution(i, relabelled, authPub)).toThrow(InvalidCountersignatureError);
+
+    let settled = false;
+    const pending = awaitWithDefault(i, Promise.resolve(relabelled), authority.secretKey)
+      .then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason: unknown) => ({ status: "rejected" as const, reason }),
+      )
+      .then((outcome) => {
+        settled = true;
+        return outcome;
+      });
+
+    await vi.advanceTimersByTimeAsync(299_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const outcome = await pending;
+    expect(outcome.status).toBe("fulfilled");
+    if (outcome.status !== "fulfilled") throw outcome.reason;
+    expect(outcome.value.policy).toBe("default");
+    expect(outcome.value.countersignatures[0].actor).toBe("default:timeout");
+    expect(Date.parse(outcome.value.countersignatures[0].timestamp)).toBeGreaterThanOrEqual(deadline(i));
   });
 
   it("defaultResolution refuses to mint before the deadline", () => {

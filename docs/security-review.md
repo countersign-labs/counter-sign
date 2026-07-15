@@ -330,3 +330,39 @@ confirmed one regression it had introduced and refuted three other candidates:
   rejection, no crash); and a "routine NTP slew" trigger (Linux disciplines
   `CLOCK_MONOTONIC` and `CLOCK_REALTIME` from the same timekeeper, so only an
   abnormal backward *step* — not slew — diverges them).
+
+A standard Codex review of the CS-22/CS-23 commit found one more security gap plus
+a tooling regression:
+
+- **CS-24 · An early Default could be relabelled past the approver branch (High)
+  — FIXED.** `verifyResolution`'s `policy:"approver"` branch trusted the *unsigned*
+  `Resolution.policy` and never checked each receipt's *signed* `policy`, and
+  `default:timeout` was an allowed approver actor. So an Intent that lists
+  `default:timeout` in its (agent-signed) `approvers`, plus a hostile adapter that
+  wraps an early authority-signed `policy:"default"` / `actor:"default:timeout"`
+  receipt inside a Resolution *labelled* `policy:"approver"`, dodged both
+  `awaitWithDefault`'s CS-22 layer-3 discard (which keyed off the unsigned wrapper
+  policy) and the approver allowlist — authorizing a `default:"approve"` action
+  before the deadline. Fix (same principle as CS-21 — bind to *signed* content,
+  never the attacker-controlled wrapper): the approver branch now requires every
+  receipt's own signed `policy` to be `"approver"`; `default:timeout` (normalized)
+  is filtered from the approver allowlist *and* rejected as a receipt actor; and
+  the layer-3 early-discard keys off the signed receipt policy
+  (`countersignatures.some(cs => cs.policy === "default")`) instead of the unsigned
+  `Resolution.policy`. `PendingDecisions.settle` excludes `default:timeout` from
+  its `approverSet` too, keeping settle-level gating in parity (defense in depth;
+  every shipped adapter already channel-prefixes actors, so this is unreachable in
+  practice but removes the asymmetry). An adversarial multi-agent re-review of this
+  fix returned clean — no residual bypass and no CS-17..CS-23 regression. +4 tests.
+- **CS-25 · The CS-22 mint guard broke the conformance-vector generator (tooling)
+  — FIXED.** `scripts/gen-payloads.ts` builds a fresh 300s Intent and calls
+  `defaultResolution` immediately, so the CS-22 pre-deadline guard made
+  `npm run gen:payloads` deterministically throw, and the checked-in
+  `default-timeout` vector was stamped ~5 min before its Intent's deadline
+  (inconsistent with the new rule). The generator now advances `Date.now` to the
+  deadline while minting the timeout vector (restored in `finally`), and the
+  refreshed fixture is an on-time Resolution that round-trips through
+  `verifyResolution` (asserted in `signing.test.ts`).
+
+The layer-3 discard described under CS-22 above was subsequently rebound (CS-24) to
+key off each receipt's *signed* policy rather than the unsigned `Resolution.policy`.

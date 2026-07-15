@@ -10,6 +10,8 @@ import type { Intent, Resolution } from "./types.js";
 
 /** Node's setTimeout ceiling (2^31-1 ms ≈ 24.8 days); larger delays clamp to ~1 ms. */
 const MAX_TIMER_MS = 2_147_483_647;
+/** Reserved actor for the runtime's timeout Default; never a human approver. */
+export const DEFAULT_TIMEOUT_ACTOR = "default:timeout";
 
 /** Epoch milliseconds at which the Intent's Default fires. */
 export function deadline(intent: Intent): number {
@@ -117,10 +119,26 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
     // authority vouches for (e.g. any member of the delivery channel) could
     // decide — the signed `approvers` field would be decorative. A veto is as
     // much an exercise of authority as an approval.
-    const allow = new Set(intent.approvers.map(normalizeActor));
+    // `default:timeout` is reserved for the runtime's timeout Default and can
+    // never be a human approver, even if a hostile Intent lists a normalized
+    // variant of it in `approvers`.
+    const allow = new Set(
+      intent.approvers.map(normalizeActor).filter((actor) => actor !== DEFAULT_TIMEOUT_ACTOR),
+    );
     const distinct = new Set<string>();
     for (const cs of receipts) {
+      // Resolution.policy is unsigned wrapper metadata. Bind this proof to the
+      // receipt's signed policy so a Default receipt cannot be relabelled as a
+      // human approval or veto.
+      if (cs.policy !== "approver")
+        throw new InvalidCountersignatureError(
+          `${resolution.decision} resolution for ${intent.intent_id} has a receipt whose signed policy is ${JSON.stringify(cs.policy)}, not "approver"`,
+        );
       const actor = normalizeActor(cs.actor);
+      if (actor === DEFAULT_TIMEOUT_ACTOR)
+        throw new InvalidCountersignatureError(
+          `${resolution.decision} resolution for ${intent.intent_id} uses reserved actor default:timeout as an approver`,
+        );
       if (!allow.has(actor))
         throw new InvalidCountersignatureError(
           `${resolution.decision} resolution for ${intent.intent_id} has a receipt from ${cs.actor}, who is not in the Intent's approvers`,
@@ -207,12 +225,14 @@ export async function awaitWithDefault(
   const guarded: Promise<Resolution> = resolution.then(
     (r) => {
       if (Date.now() >= deadline(intent)) return mintDefault(intent, authoritySecret);
-      // A Default is minted by the enforcing runtime AT the deadline. An
-      // adapter-supplied policy:"default" arriving before it is a fabricated
-      // timeout — even a forged future timestamp (signable by anyone holding
-      // the authority key) must not close the review window early. Discard it
-      // like a rejected promise; the timer mints the genuine Default on time.
-      if ((r as Resolution | null)?.policy === "default") return new Promise<Resolution>(() => {});
+      // A Default is minted by the enforcing runtime AT the deadline. Key this
+      // check off each receipt's signed policy, not the unsigned Resolution
+      // wrapper, so relabelling the wrapper cannot close the review window
+      // early. Discard it like a rejected promise; the timer mints the genuine
+      // Default on time.
+      const suppliedReceipts = (r as Resolution | null)?.countersignatures;
+      if (Array.isArray(suppliedReceipts) && suppliedReceipts.some((cs) => cs?.policy === "default"))
+        return new Promise<Resolution>(() => {});
       return r;
     },
     () => new Promise<Resolution>(() => {}),

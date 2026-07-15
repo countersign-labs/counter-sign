@@ -222,17 +222,29 @@ export async function awaitWithDefault(
   // so a late resolution (e.g. an adapter whose timer is overdue after an
   // event-loop stall) can never beat the timeout. A rejected adapter promise
   // never wins the race; the Default timer decides.
+  const expectedAuthorityPublicKey = publicKeyFromSecret(authoritySecret);
   const guarded: Promise<Resolution> = resolution.then(
     (r) => {
       if (Date.now() >= deadline(intent)) return mintDefault(intent, authoritySecret);
-      // A Default is minted by the enforcing runtime AT the deadline. Key this
-      // check off each receipt's signed policy, not the unsigned Resolution
-      // wrapper, so relabelling the wrapper cannot close the review window
-      // early. Discard it like a rejected promise; the timer mints the genuine
-      // Default on time.
-      const suppliedReceipts = (r as Resolution | null)?.countersignatures;
-      if (Array.isArray(suppliedReceipts) && suppliedReceipts.some((cs) => cs?.policy === "default"))
-        return new Promise<Resolution>(() => {});
+      // An adapter delivering a Default before the deadline is discarded so the
+      // runtime's own timer mints the genuine one on time. Recognise that ONLY
+      // by AUTHENTICATING the receipt — a single default:timeout receipt for
+      // this intent, signed by the expected authority — never by an unverified
+      // `policy` field. Otherwise a forged/foreign receipt whose raw policy
+      // reads "default" could suppress a real human decision (e.g. drop a veto,
+      // letting a default:"approve" timer approve). Anything that is not an
+      // authenticated Default delivery falls through to verifyResolution, which
+      // fails closed on the contaminant. This also ignores the attacker-set
+      // Resolution.policy wrapper entirely (CS-24).
+      const receipts = (r as Resolution | null)?.countersignatures;
+      const isEarlyDefaultDelivery =
+        Array.isArray(receipts) &&
+        receipts.length === 1 &&
+        receipts[0]?.policy === "default" &&
+        receipts[0].intent_id === intent.intent_id &&
+        normalizeActor(receipts[0].actor) === DEFAULT_TIMEOUT_ACTOR &&
+        verifyCountersignature(receipts[0], { trustedKeys: expectedAuthorityPublicKey });
+      if (isEarlyDefaultDelivery) return new Promise<Resolution>(() => {});
       return r;
     },
     () => new Promise<Resolution>(() => {}),
@@ -261,6 +273,6 @@ export async function awaitWithDefault(
           }),
         ]).finally(() => clearTimeout(timer));
 
-  verifyResolution(intent, winner, publicKeyFromSecret(authoritySecret));
+  verifyResolution(intent, winner, expectedAuthorityPublicKey);
   return winner;
 }

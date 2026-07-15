@@ -364,5 +364,26 @@ a tooling regression:
   refreshed fixture is an on-time Resolution that round-trips through
   `verifyResolution` (asserted in `signing.test.ts`).
 
-The layer-3 discard described under CS-22 above was subsequently rebound (CS-24) to
-key off each receipt's *signed* policy rather than the unsigned `Resolution.policy`.
+A follow-up Codex review of the CS-24 commit found the rebind was still incomplete:
+
+- **CS-26 · The early-Default discard trusted an UNVERIFIED receipt policy (High)
+  — FIXED.** CS-24 rebound `awaitWithDefault`'s layer-3 discard to key off the
+  receipt's `policy` field instead of the unsigned `Resolution.policy` — but it
+  still read that field WITHOUT authenticating the receipt (`some(cs => cs.policy
+  === "default")`). So for a `default:"approve"` intent, a custom adapter could
+  resolve early with a genuine human veto contaminated by one appended receipt
+  whose raw `policy` reads `"default"` but whose signature is forged or whose
+  `intent_id` is foreign; the whole resolution (veto included) was discarded
+  before `verifyResolution` ran, and the timer then minted an `approve` — a veto
+  silently flipped to a timeout approval. Same lesson as CS-21/CS-24: never trust
+  an unverified field. The discard now fires only for an AUTHENTICATED Default
+  delivery — exactly one `default:timeout` receipt for this `intent_id`, signed by
+  the expected authority (`verifyCountersignature`); anything else falls through to
+  `verifyResolution` and fails closed on the contaminant. A genuine early Default
+  is still discarded so the timer mints the real one (CS-22 preserved). +3 tests
+  (contaminated-veto via forged and foreign receipts, plus the genuine-default
+  regression).
+
+The layer-3 discard described under CS-22 above was subsequently rebound (CS-24,
+then CS-26) to fire only on an *authenticated* single `default:timeout` receipt,
+never on an unverified `policy` field or the unsigned `Resolution.policy`.

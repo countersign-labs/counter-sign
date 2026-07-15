@@ -539,6 +539,59 @@ describe("the Default cannot fire early (Codex CS-22)", () => {
   });
 });
 
+describe("the early-Default discard authenticates the receipt first (Codex CS-26)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("does not let an UNVERIFIED policy:'default' receipt suppress a veto into a timeout-approve", async () => {
+    // A default:"approve" intent (quorum 1). A custom adapter resolves EARLY with a
+    // genuine human veto, contaminated by an appended receipt whose policy says
+    // "default" but is FOREIGN (signed over a different intent). The old discard keyed
+    // off the unverified policy field, dropped the whole veto, and the timer minted an
+    // approve. It must instead reach verifyResolution and fail closed.
+    const i = intent(1, { approvers: ["m:alice"], default: "approve", timeout: 1 });
+    const foreign = intent(1, { approvers: ["m:alice"], default: "approve" });
+    const contaminated: Resolution = {
+      decision: "reject",
+      policy: "approver",
+      countersignatures: [
+        signDecision(i, "reject", "m:alice", authority.secretKey, "approver"), // genuine veto
+        signDecision(foreign, "reject", "default:timeout", authority.secretKey, "default"), // foreign, unverified-"default"
+      ],
+    };
+    await expect(awaitWithDefault(i, Promise.resolve(contaminated), authority.secretKey)).rejects.toThrow(
+      InvalidCountersignatureError,
+    );
+  });
+
+  it("does not let a BADLY-SIGNED policy:'default' receipt suppress a veto either", async () => {
+    const i = intent(1, { approvers: ["m:alice"], default: "approve", timeout: 1 });
+    const tampered = { ...signDecision(i, "reject", "default:timeout", authority.secretKey, "default"), signature: "AAAA" };
+    const contaminated: Resolution = {
+      decision: "reject",
+      policy: "approver",
+      countersignatures: [signDecision(i, "reject", "m:alice", authority.secretKey, "approver"), tampered],
+    };
+    await expect(awaitWithDefault(i, Promise.resolve(contaminated), authority.secretKey)).rejects.toThrow(
+      InvalidCountersignatureError,
+    );
+  });
+
+  it("STILL discards a genuine authenticated early Default so the timer mints the real one (CS-22 preserved)", async () => {
+    vi.useFakeTimers();
+    const i = intent(1); // default: reject
+    const early: Resolution = {
+      decision: "reject",
+      policy: "default",
+      countersignatures: [signDecision(i, "reject", "default:timeout", authority.secretKey, "default")],
+    };
+    const pending = awaitWithDefault(i, Promise.resolve(early), authority.secretKey);
+    await vi.advanceTimersByTimeAsync(300_000 + 10);
+    const r = await pending;
+    expect(r.policy).toBe("default");
+    expect(Date.parse(r.countersignatures[0].timestamp)).toBeGreaterThanOrEqual(deadline(i)); // genuine, on-time
+  });
+});
+
 describe("the honest Default path survives a backward wall-clock step (Codex CS-23)", () => {
   afterEach(() => vi.useRealTimers());
 

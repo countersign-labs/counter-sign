@@ -565,6 +565,22 @@ describe("adapter faults and contradictory Defaults fail closed, never approve (
     expect(r.policy).toBe("default"); // genuine silence still yields the Default
   });
 
+  it("a far-future-deadline Intent with a REJECTING adapter fails closed with NO unhandled rejection", async () => {
+    // The CS-28a rejection handler can throw; if the far-future guard throws after the
+    // guarded promise is wired up, that guarded rejection is orphaned → unhandled → crash.
+    const rejections: unknown[] = [];
+    const onRej = (e: unknown) => rejections.push(e);
+    process.on("unhandledRejection", onRej);
+    try {
+      const bad = { ...intent(1, { default: "approve" }), created_at: "+275760-09-13T00:00:00.000Z" };
+      await expect(awaitWithDefault(bad, Promise.reject(new Error("route failed")), authority.secretKey)).rejects.toThrow();
+      await new Promise((r) => setTimeout(r, 30)); // let any unhandled rejection surface
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRej);
+    }
+  });
+
   it("does not swallow a contradictory early Default into an approval", async () => {
     vi.useFakeTimers();
     const i = intent(1, { approvers: ["m:alice"], default: "approve" }); // expected Default = approve

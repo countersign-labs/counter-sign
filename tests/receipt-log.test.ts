@@ -6,10 +6,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Adapter } from "../src/adapter.js";
-import { signDecision } from "../src/core/countersignature.js";
+import { normalizeActor, signDecision } from "../src/core/countersignature.js";
 import { CountersignError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
-import { generateKeypair, publicKeyFromSecret } from "../src/core/keys.js";
+import { generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
 import type { Decision, Intent, Resolution } from "../src/core/types.js";
 import { ReceiptLog } from "../src/receipt-log.js";
 import { wrapAction } from "../src/shim.js";
@@ -18,16 +18,39 @@ const agent = { id: "agent:test", keypair: generateKeypair() };
 const authority = generateKeypair().secretKey;
 const authorityPub = publicKeyFromSecret(authority);
 
+const approverKeys = new Map<string, Keypair>();
+function keyOf(actor: string): Keypair {
+  let kp = approverKeys.get(actor);
+  if (!kp) { kp = generateKeypair(); approverKeys.set(actor, kp); }
+  return kp;
+}
+
 function intent(quorum = 1): Intent {
+  const approvers =
+    quorum > 1
+      ? [
+          { actor: "local:a", mode: "keyed" as const, public_key: keyOf("local:a").publicKey },
+          { actor: "local:b", mode: "keyed" as const, public_key: keyOf("local:b").publicKey },
+        ]
+      : ["local:a", "local:b"];
   return createIntent(
-    { action: "demo.op", summary: "Do the thing", risk_tier: "high", approvers: ["local:a", "local:b"], quorum, timeout: 300, default: "reject" },
+    { action: "demo.op", summary: "Do the thing", risk_tier: "high", approvers, quorum, timeout: 300, default: "reject" },
     agent,
   );
 }
 
-/** A resolution built from real signed receipts, as an adapter would produce. */
-function approval(i: Intent, actors: string[], secret = authority): Resolution {
-  return { decision: "approve", policy: "approver", countersignatures: actors.map((a) => signDecision(i, "approve", a, secret)) };
+/** A resolution built from real signed receipts, as an adapter would produce. A
+ *  keyed approver's receipt is signed by their own key; a vouched one by the authority. */
+function approval(i: Intent, actors: string[]): Resolution {
+  return {
+    decision: "approve",
+    policy: "approver",
+    countersignatures: actors.map((a) => {
+      const ap = i.approvers.find((x) => normalizeActor(x.actor) === normalizeActor(a));
+      const secret = ap?.mode === "keyed" ? keyOf(a).secretKey : authority;
+      return signDecision(i, "approve", a, secret, "approver");
+    }),
+  };
 }
 
 let dir: string;

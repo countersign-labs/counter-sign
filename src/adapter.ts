@@ -4,11 +4,11 @@
 
 import type { IncomingMessage } from "node:http";
 import { CountersignError } from "./core/errors.js";
-import { normalizeActor, signDecision } from "./core/countersignature.js";
+import { normalizeActor, signDecision, verifyCountersignature } from "./core/countersignature.js";
 import { deadline, DEFAULT_TIMEOUT_ACTOR } from "./core/defaults.js";
 import { quorumOf } from "./core/intent.js";
 import { generateKeypair } from "./core/keys.js";
-import type { Countersignature, Decision, Intent, Resolution } from "./core/types.js";
+import type { Approver, Countersignature, Decision, Intent, Resolution } from "./core/types.js";
 
 /**
  * The single interface every counter-sign adapter implements. Adapters are
@@ -52,8 +52,10 @@ export type SettleResult =
 interface PendingEntry {
   intent: Intent;
   quorum: number;
-  /** normalized identities allowed to decide (the Intent's `approvers`) */
+  /** normalized identities allowed to decide via server-vouched settle (`vouched` approvers) */
   approverSet: Set<string>;
+  /** normalized actor -> the `keyed` approver, who signs their own receipt (via record) */
+  keyedApprovers: Map<string, Approver>;
   /** approve receipts keyed by distinct actor, so one person cannot fill a multi-person quorum */
   approvals: Map<string, Countersignature>;
   resolve: (r: Resolution) => void;
@@ -71,10 +73,21 @@ export class PendingDecisions {
       const entry: PendingEntry = {
         intent,
         quorum: quorumOf(intent),
-        // `default:timeout` is the runtime's reserved Default actor and can never be a
-        // human approver, even if a hostile Intent lists it — mirrors verifyResolution's
-        // choke-point check so settle-level gating stays in parity (defense in depth).
-        approverSet: new Set(intent.approvers.map(normalizeActor).filter((a) => a !== DEFAULT_TIMEOUT_ACTOR)),
+        // Only `vouched` approvers can be settled by the server (it signs on their
+        // behalf). A `keyed` approver signs their own receipt off-server, so the
+        // server must not vouch for them here. `default:timeout` is reserved and can
+        // never be a human approver — mirrors verifyResolution's choke-point checks.
+        approverSet: new Set(
+          intent.approvers
+            .filter((a) => a.mode === "vouched")
+            .map((a) => normalizeActor(a.actor))
+            .filter((a) => a !== DEFAULT_TIMEOUT_ACTOR),
+        ),
+        keyedApprovers: new Map(
+          intent.approvers
+            .filter((a) => a.mode === "keyed" && normalizeActor(a.actor) !== DEFAULT_TIMEOUT_ACTOR)
+            .map((a) => [normalizeActor(a.actor), a] as const),
+        ),
         approvals: new Map(),
         resolve,
         reject,
@@ -151,6 +164,50 @@ export class PendingDecisions {
       return { countersignature: cs, status: "resolved", collected: entry.approvals.size, quorum: entry.quorum, decision: "approve" };
     }
     return { countersignature: cs, status: "pending", collected: entry.approvals.size, quorum: entry.quorum };
+  }
+
+  /**
+   * Record a PRE-SIGNED `keyed` receipt toward resolving an Intent. Unlike
+   * settle — where the server signs a vouched approver's button press with the
+   * authority key — here the approver has signed their OWN receipt off-server
+   * (CLI in Phase 1, passkey in Phase 2); the server only VERIFIES it against the
+   * approver's bound key and accumulates it. This is how a keyed quorum is
+   * collected, and the server cannot forge it (it holds no approver key).
+   *
+   * Returns null (ignored) if the intent is unknown, resolved, or past its
+   * deadline; or the receipt is not a valid `keyed`-approver decision for this
+   * intent (wrong intent, non-keyed/unlisted actor, bad signature, wrong policy).
+   * A `reject` from a listed keyed approver vetoes immediately; an `approve`
+   * counts once per distinct actor and resolves at `quorum`.
+   */
+  record(receipt: Countersignature): SettleResult | null {
+    if (!receipt || typeof receipt !== "object") return null;
+    const entry = this.entries.get(receipt.intent_id);
+    if (!entry) return null;
+    if (Date.now() >= deadline(entry.intent)) {
+      clearTimeout(entry.timer);
+      this.entries.delete(receipt.intent_id);
+      return null;
+    }
+    if (receipt.policy !== "approver") return null;
+    if (receipt.decision !== "approve" && receipt.decision !== "reject") return null;
+    const actor = normalizeActor(receipt.actor);
+    const approver = entry.keyedApprovers.get(actor);
+    // Must be a keyed approver of THIS intent, and the receipt must verify against
+    // that approver's bound key — the server never vouches for a keyed decision.
+    if (!approver?.public_key) return null;
+    if (!verifyCountersignature(receipt, { trustedKeys: approver.public_key })) return null;
+
+    if (receipt.decision === "reject") {
+      this.finish(receipt.intent_id, entry, { decision: "reject", policy: "approver", countersignatures: [receipt] });
+      return { countersignature: receipt, status: "resolved", collected: entry.approvals.size, quorum: entry.quorum, decision: "reject" };
+    }
+    entry.approvals.set(actor, receipt);
+    if (entry.approvals.size >= entry.quorum) {
+      this.finish(receipt.intent_id, entry, { decision: "approve", policy: "approver", countersignatures: [...entry.approvals.values()] });
+      return { countersignature: receipt, status: "resolved", collected: entry.approvals.size, quorum: entry.quorum, decision: "approve" };
+    }
+    return { countersignature: receipt, status: "pending", collected: entry.approvals.size, quorum: entry.quorum };
   }
 
   /** Resolve a pending entry: cancel its reaper, drop it from the map, settle the promise. */

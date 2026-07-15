@@ -6,15 +6,33 @@ import { signDecision, verifyCountersignature } from "../src/core/countersignatu
 import { awaitWithDefault, deadline, defaultResolution, isExpired } from "../src/core/defaults.js";
 import { InvalidCountersignatureError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
-import { generateKeypair } from "../src/core/keys.js";
-import type { Countersignature, Decision, Policy, Resolution } from "../src/core/types.js";
+import { generateKeypair, type Keypair } from "../src/core/keys.js";
+import type { Countersignature, Decision, Intent, Policy, Resolution } from "../src/core/types.js";
 
 const agent = { id: "agent:test", keypair: generateKeypair() };
 const authority = generateKeypair().secretKey;
 
+// Keyed approvers (quorum > 1 requires keyed) with stable per-actor keys.
+const approverKeys = new Map<string, Keypair>();
+function keyOf(actor: string): Keypair {
+  let kp = approverKeys.get(actor);
+  if (!kp) { kp = generateKeypair(); approverKeys.set(actor, kp); }
+  return kp;
+}
+function keyedReceipt(i: Intent, decision: Decision, actor: string) {
+  return signDecision(i, decision, actor, keyOf(actor).secretKey, "approver");
+}
+
 function intentWith(timeout: number, def: Decision, quorum = 1) {
+  const approvers =
+    quorum > 1
+      ? [
+          { actor: "local:you", mode: "keyed" as const, public_key: keyOf("local:you").publicKey },
+          { actor: "local:them", mode: "keyed" as const, public_key: keyOf("local:them").publicKey },
+        ]
+      : ["local:you"];
   return createIntent(
-    { action: "demo.op", summary: "Do the thing", risk_tier: "low", approvers: ["local:you"], quorum, timeout, default: def },
+    { action: "demo.op", summary: "Do the thing", risk_tier: "low", approvers, quorum, timeout, default: def },
     agent,
   );
 }
@@ -107,7 +125,7 @@ describe("resolution validation at the race boundary", () => {
     const underQuorum: Resolution = {
       decision: "approve",
       policy: "approver",
-      countersignatures: [signDecision(intent, "approve", "local:alice", authority)],
+      countersignatures: [keyedReceipt(intent, "approve", "local:you")],
     };
     await expect(awaitWithDefault(intent, Promise.resolve(underQuorum), authority)).rejects.toThrow(
       InvalidCountersignatureError,
@@ -120,8 +138,8 @@ describe("resolution validation at the race boundary", () => {
       decision: "approve",
       policy: "approver",
       countersignatures: [
-        signDecision(intent, "approve", "local:alice", authority),
-        signDecision(intent, "approve", "local:alice", authority),
+        keyedReceipt(intent, "approve", "local:you"),
+        keyedReceipt(intent, "approve", "local:you"),
       ],
     };
     await expect(awaitWithDefault(intent, Promise.resolve(sameActor), authority)).rejects.toThrow(

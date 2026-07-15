@@ -462,3 +462,43 @@ Default on time, and a real early human veto still wins immediately.
   unhandled rejection. +1 test (149 total). A subsequent 3-lens adversarial audit
   of the whole CS-28 change set (fail-closed rejection path, decision-consistent
   classifier, adapter UI lifecycle across all channels) returned clean.
+
+## v0.2 — per-approver-key quorum (resolves the trust-model gap)
+
+External review (S. Upadhyay) restated the §1 "Trust model" limitation as a
+finding: *"M-of-N approvals are all signed by a single Authority Key… anyone with
+access to the key has super powers."* v0.2 resolves it — a compromised runtime
+authority key can no longer forge a quorum — across three phases, each shipped
+with an adversarial audit. Findings caught and fixed during development:
+
+- **CS-29 · Phase 1 keyed-quorum separation-of-duty edges (audit) — FIXED.** Two
+  hardening items the Phase 1 audit surfaced: keyed approver keys are deduped by
+  exact string, but a 32-byte ed25519 key has several base64url encodings, so a
+  non-canonical twin could fill two "distinct" quorum slots — now every keyed key
+  must be the CANONICAL encoding; and a keyed approver bound to the AUTHORITY key
+  is rejected (it would degrade separation of duty). (`b27ab69`)
+- **CS-30 · Phase 2 stored XSS in the signing page (High) — FIXED.** The passkey
+  signing page embedded `const D = ${JSON.stringify(data)}` inside `<script>`, and
+  `data` includes the agent-controlled `intent.summary`/`action`; `JSON.stringify`
+  does not escape `</script>`, so a crafted summary broke out — a stored XSS on the
+  RP origin. Now the JSON is `\u`-escaped (`<`, U+2028/9) and the response carries a
+  strict CSP with a per-request nonce. Caught by both the Phase 2 audit and the
+  automated commit review. (`8afb0e4`)
+- **CS-31 · ReceiptLog.verifyAll did not verify passkey receipts (audit) — FIXED.**
+  It called `verifyCountersignature` without the WebAuthn RP policy, so every logged
+  passkey receipt was reported invalid-signature (a false audit failure); the policy
+  is now threaded through. The WebAuthn verifier also rejects cross-origin assertions
+  now (defense in depth with `frame-ancestors 'none'`). (`bf758f7`)
+- **CS-32 · Phase 3 registry tail-truncation / rollback (High) — FIXED.**
+  `ApproverRegistry.verifyChain` is a backward-only hash chain, so any prefix of a
+  valid log verifies. An attacker with write access to the persisted registry (but
+  not the org-root key — the exact tamper model) could drop a trailing `revoke`
+  record and silently resurrect a revoked key, passing `assertApproversEnrolled`.
+  Fixed with an externally-anchored `head()` (`expectedHead`), mirroring
+  `ReceiptLog`; a deployment that revokes keys MUST anchor the head. (`94da9a7`)
+
+The end-to-end property now holds: org-root attests each approver key → the agent
+binds it into the signed Intent → the approver signs their own receipt (raw key or
+passkey) → the verifier checks all three. A holder of the runtime authority key
+forges none of these links. See `spec/countersign-spec.md` §1 and the phase design
+docs under `docs/superpowers/specs/`.

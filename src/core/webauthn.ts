@@ -10,7 +10,7 @@
 // A raw 43-char base64url key (no prefix) is a plain-ed25519 keyed approver (Phase 1).
 
 import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
-import { fromB64url, utf8, verifyRaw } from "./keys.js";
+import { fromB64url, toB64url, utf8, verifyRaw } from "./keys.js";
 
 /** SPKI DER prefix for an uncompressed P-256 (prime256v1) public key. */
 const P256_SPKI_PREFIX = Buffer.from("3059301306072a8648ce3d020106082a8648ce3d030107034200", "hex");
@@ -26,11 +26,8 @@ export interface WebAuthnAssertion {
   client_data_json: string;
 }
 
-export interface WebAuthnVerifyOptions {
-  /** the bound credential descriptor (webauthn-ed25519:… | webauthn-p256:…) */
-  credential: string;
-  /** base64url the clientData challenge MUST equal (our receipt digest) */
-  expectedChallenge: string;
+/** Deployment policy for verifying passkey receipts — the signing page's domain. */
+export interface WebAuthnPolicy {
   /** the Relying Party ID (registrable domain) the assertion must be scoped to */
   rpId: string;
   /** exact web origins allowed to have produced the assertion */
@@ -39,9 +36,47 @@ export interface WebAuthnVerifyOptions {
   requireUserVerification?: boolean;
 }
 
+export interface WebAuthnVerifyOptions extends WebAuthnPolicy {
+  /** the bound credential descriptor (webauthn-ed25519:… | webauthn-p256:…) */
+  credential: string;
+  /** base64url the clientData challenge MUST equal (our receipt digest) */
+  expectedChallenge: string;
+}
+
 /** True iff `s` is a passkey credential descriptor (vs. a plain-ed25519 keyed key). */
 export function isWebAuthnCredential(s: unknown): s is string {
   return typeof s === "string" && (s.startsWith(ED25519_PREFIX) || s.startsWith(P256_PREFIX));
+}
+
+/**
+ * True iff `s` is a WELL-FORMED passkey descriptor: a known prefix followed by a
+ * key of the right length in CANONICAL base64url (re-encoding the decoded bytes
+ * yields the same string), so two encodings of one credential can't masquerade
+ * as distinct approvers.
+ */
+export function isValidCredentialDescriptor(s: unknown): s is string {
+  if (typeof s !== "string") return false;
+  let prefix: string;
+  let len: number;
+  if (s.startsWith(ED25519_PREFIX)) {
+    prefix = ED25519_PREFIX;
+    len = 32;
+  } else if (s.startsWith(P256_PREFIX)) {
+    prefix = P256_PREFIX;
+    len = 65;
+  } else {
+    return false;
+  }
+  const keyPart = s.slice(prefix.length);
+  let bytes: Buffer;
+  try {
+    bytes = fromB64url(keyPart);
+  } catch {
+    return false;
+  }
+  if (bytes.length !== len || toB64url(bytes) !== keyPart) return false;
+  if (prefix === P256_PREFIX && bytes[0] !== 0x04) return false; // uncompressed point marker
+  return true;
 }
 
 function eqB64url(a: string, b: string): boolean {

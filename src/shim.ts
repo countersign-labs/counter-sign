@@ -4,6 +4,7 @@
 
 import { authorityKeyFromEnv, warnOnce, type Adapter } from "./adapter.js";
 import { awaitWithDefault } from "./core/defaults.js";
+import type { WebAuthnPolicy } from "./core/webauthn.js";
 import { IntentRejectedError } from "./core/errors.js";
 import { createIntent, type AgentIdentity } from "./core/intent.js";
 import { generateKeypair } from "./core/keys.js";
@@ -29,6 +30,12 @@ export interface WrapOptions {
    * throws, the action does not run (fail-closed audit). Omit it to stay stateless.
    */
   receiptLog?: ReceiptSink;
+  /**
+   * Deployment policy for verifying passkey (WebAuthn) approver receipts — the
+   * signing page's RP ID and allowed origins. REQUIRED if any approver is a
+   * passkey; without it a passkey receipt fails closed at verification.
+   */
+  webauthn?: WebAuthnPolicy;
 }
 
 let processAgent: AgentIdentity | undefined;
@@ -71,7 +78,7 @@ export function wrapAction<A extends unknown[], R>(
 
     await adapter.deliver(intent);
     const authority = opts.authorityKey ?? authorityKeyFromEnv();
-    const resolution = await awaitWithDefault(intent, adapter.awaitResolution(intent), authority);
+    const resolution = await awaitWithDefault(intent, adapter.awaitResolution(intent), authority, opts.webauthn);
     const decisive = resolution.countersignatures[resolution.countersignatures.length - 1];
     opts.onResolution?.(resolution);
     if (decisive) opts.onDecision?.(decisive);

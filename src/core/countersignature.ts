@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0; see LICENSE at repo root.
 
+import { createHash } from "node:crypto";
 import { canonicalize } from "./canonical.js";
-import { publicKeyFromSecret, signContext, verifyContext } from "./keys.js";
+import { publicKeyFromSecret, signContext, toB64url, utf8, verifyContext } from "./keys.js";
+import { isWebAuthnCredential, verifyWebAuthnAssertion, type WebAuthnPolicy } from "./webauthn.js";
 import {
   COUNTERSIGN_VERSION,
   COUNTERSIGNATURE_CONTEXT,
@@ -35,6 +37,12 @@ export interface VerifyOptions {
    * no authority. STRONGLY recommended for any party acting on a receipt.
    */
   trustedKeys?: readonly string[] | string;
+  /**
+   * Deployment policy for verifying passkey (WebAuthn) receipts. REQUIRED to
+   * verify a receipt whose `public_key` is a passkey descriptor — without it a
+   * passkey receipt cannot be verified and fails closed.
+   */
+  webauthn?: WebAuthnPolicy;
 }
 
 /**
@@ -79,11 +87,31 @@ export function signDecision(
  */
 export function verifyCountersignature(cs: Countersignature, opts: VerifyOptions = {}): boolean {
   try {
-    const { signature, ...unsigned } = cs;
+    const { signature, webauthn, ...unsigned } = cs;
     if (typeof signature !== "string" || typeof cs.public_key !== "string") return false;
     if (opts.trustedKeys !== undefined) {
       const trusted = typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys;
       if (!trusted.includes(cs.public_key)) return false;
+    }
+    const passkey = isWebAuthnCredential(cs.public_key);
+    if (passkey || webauthn !== undefined) {
+      // Passkey (WebAuthn) receipt: the signature is an authenticator assertion,
+      // not a plain ed25519 signature over the receipt. A webauthn block with a
+      // non-passkey key (or vice versa) is malformed → reject. Without an RP
+      // policy a passkey receipt cannot be verified → fail closed.
+      if (!passkey || !webauthn || typeof webauthn !== "object" || !opts.webauthn) return false;
+      // The assertion binds to THIS decision via challenge = digest of the
+      // canonical receipt (minus signature and webauthn), domain-separated.
+      const challenge = toB64url(
+        createHash("sha256").update(utf8(`${COUNTERSIGNATURE_CONTEXT}\n${canonicalize(unsigned)}`)).digest(),
+      );
+      return verifyWebAuthnAssertion(webauthn, signature, {
+        credential: cs.public_key,
+        expectedChallenge: challenge,
+        rpId: opts.webauthn.rpId,
+        allowedOrigins: opts.webauthn.allowedOrigins,
+        requireUserVerification: opts.webauthn.requireUserVerification,
+      });
     }
     return verifyContext(cs.public_key, COUNTERSIGNATURE_CONTEXT, canonicalize(unsigned), signature);
   } catch {

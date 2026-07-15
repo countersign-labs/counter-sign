@@ -8,6 +8,7 @@ import { normalizeActor, signDecision, verifyCountersignature } from "./core/cou
 import { deadline, DEFAULT_TIMEOUT_ACTOR } from "./core/defaults.js";
 import { quorumOf } from "./core/intent.js";
 import { generateKeypair } from "./core/keys.js";
+import type { WebAuthnPolicy } from "./core/webauthn.js";
 import type { Approver, Countersignature, Decision, Intent, Resolution } from "./core/types.js";
 
 /**
@@ -180,7 +181,7 @@ export class PendingDecisions {
    * A `reject` from a listed keyed approver vetoes immediately; an `approve`
    * counts once per distinct actor and resolves at `quorum`.
    */
-  record(receipt: Countersignature): SettleResult | null {
+  record(receipt: Countersignature, webauthn?: WebAuthnPolicy): SettleResult | null {
     if (!receipt || typeof receipt !== "object") return null;
     const entry = this.entries.get(receipt.intent_id);
     if (!entry) return null;
@@ -195,8 +196,9 @@ export class PendingDecisions {
     const approver = entry.keyedApprovers.get(actor);
     // Must be a keyed approver of THIS intent, and the receipt must verify against
     // that approver's bound key — the server never vouches for a keyed decision.
+    // A passkey (WebAuthn) receipt needs the RP policy to verify; without it, fail closed.
     if (!approver?.public_key) return null;
-    if (!verifyCountersignature(receipt, { trustedKeys: approver.public_key })) return null;
+    if (!verifyCountersignature(receipt, { trustedKeys: approver.public_key, webauthn })) return null;
 
     if (receipt.decision === "reject") {
       this.finish(receipt.intent_id, entry, { decision: "reject", policy: "approver", countersignatures: [receipt] });

@@ -43,6 +43,11 @@ A holder of the **runtime authority key** can forge none of these links: not the
 ## Security notes
 
 - Org-root key custody is the new root of trust; it MUST be distinct from the runtime authority key (ideally offline/HSM). Documented prominently.
+- Registry tamper-evidence via hash-chaining. NOTE: a backward-only chain does
+  not detect TAIL TRUNCATION (a valid prefix is a valid log), which could resurrect
+  a revoked key. `verifyChain`/`assertApproversEnrolled` therefore accept an
+  `expectedHead` (an externally-anchored `head()`); a deployment that revokes keys
+  MUST capture the head somewhere the registry writer cannot roll back.
 - Registry tamper-evidence via hash-chaining; a verifier SHOULD pin the registry head out-of-band (same mitigation as the receipt log §6 item).
 - Enrollment PoP prevents key-confusion / planted-key attacks.
 

@@ -26,6 +26,7 @@ export {
   createEnrollmentProof,
   assertApproversEnrolled,
   type EnrollmentRecord,
+  type RegistryHead,
 } from "./registry.js";
 export {
   ReceiptLog,

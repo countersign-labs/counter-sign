@@ -22,6 +22,12 @@ export {
   type SigningServerConfig,
 } from "./signing.js";
 export {
+  ApproverRegistry,
+  createEnrollmentProof,
+  assertApproversEnrolled,
+  type EnrollmentRecord,
+} from "./registry.js";
+export {
   ReceiptLog,
   type ReceiptSink,
   type ReceiptLogReport,

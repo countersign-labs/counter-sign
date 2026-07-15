@@ -78,8 +78,11 @@ rejected, since it would reintroduce a server-forgeable slot.) A keyed receipt i
 verified against the approver's `public_key` as bound in the **agent-signed**
 Intent, so a compromised authority key can neither forge the receipt nor swap the
 bound key. The remaining trust anchors are the agent key (kept distinct from the
-authority key, §5) and the *source* of approver keys — a per-approver enrollment
-registry is the next hardening step (§6). The human passkey/WebAuthn signing UX is
+authority key, §5) and the *source* of approver keys, which an org-root-attested
+**enrollment registry** anchors (§6): each `actor → key` binding is signed by an
+org-root key distinct from the runtime authority key, in a hash-chained
+append-only log, and `assertApproversEnrolled` requires every keyed approver's
+bound key to be an active enrollment. The human passkey/WebAuthn signing UX is
 layered on top of this; the raw-key signer is the base.
 
 ## 2. Route
@@ -246,9 +249,13 @@ implementations for now.
 
 **Delivered in v0.2:** **per-approver-key quorum** — binding each approver to a
 distinct key (the `keyed` mode) so M-of-N is cryptographic separation of duty
-rather than a count the single authority vouches for (§1 "Trust model"). The
-base signer is raw ed25519; human passkey/WebAuthn signing and an approver
-enrollment registry are being layered on next.
+rather than a count the single authority vouches for (§1 "Trust model"). This
+lands in three layers: (1) the protocol core — keyed receipts verified against
+each approver's own bound key, with a raw-ed25519 signer; (2) human passkey /
+WebAuthn signing via a deep-linked signing page; and (3) an org-root-attested,
+hash-chained **enrollment registry** (`ApproverRegistry`) that anchors each
+`actor → key` binding, with proof-of-possession, revocation, and a strict
+`assertApproversEnrolled` check.
 
 One hardening item remains explicitly **planned**: a **keyed, self-anchoring
 receipt log** — a signed head per append so an append-only audit trail is

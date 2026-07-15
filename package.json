@@ -52,6 +52,7 @@
     "prepublishOnly": "npm run build && npm test",
     "keygen": "tsx scripts/keygen.ts",
     "approve": "tsx scripts/approve.ts",
+    "enroll": "tsx scripts/enroll.ts",
     "gen:payloads": "tsx scripts/gen-payloads.ts",
     "demo:local": "tsx examples/local.ts",
     "demo:quorum": "tsx examples/quorum.ts",

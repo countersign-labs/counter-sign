@@ -8,6 +8,7 @@ export { canonicalize } from "./canonical.js";
 export {
   generateKeypair,
   publicKeyFromSecret,
+  isCanonicalPublicKey,
   signBytes,
   verifyBytes,
   verifyRaw,
@@ -17,6 +18,12 @@ export {
   utf8,
   type Keypair,
 } from "./keys.js";
+export {
+  verifyWebAuthnAssertion,
+  isWebAuthnCredential,
+  type WebAuthnAssertion,
+  type WebAuthnVerifyOptions,
+} from "./webauthn.js";
 export { createIntent, verifyIntent, quorumOf, assertIntentInvariants, type AgentIdentity } from "./intent.js";
 export { signDecision, verifyCountersignature, normalizeActor, type VerifyOptions } from "./countersignature.js";
 export { deadline, isExpired, defaultResolution, verifyResolution, awaitWithDefault } from "./defaults.js";

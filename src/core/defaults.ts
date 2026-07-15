@@ -147,16 +147,26 @@ export async function awaitWithDefault(
   // wire Intent would otherwise collapse the review window (setTimeout(NaN) fires
   // immediately), silently erasing the human veto. Fail closed on a bad Intent.
   assertIntentInvariants(intent);
+
+  // Guard the adapter's resolution at the CORE level — not only in the shipped
+  // PendingDecisions helper — so the deadline rule holds for ANY Adapter: a
+  // decision OBSERVED at/after the deadline is discarded in favor of the Default,
+  // so a late resolution (e.g. an adapter whose timer is overdue after an
+  // event-loop stall) can never beat the timeout. A rejected adapter promise
+  // never wins the race; the Default timer decides.
+  const guarded: Promise<Resolution> = resolution.then(
+    (r) => (Date.now() >= deadline(intent) ? defaultResolution(intent, authoritySecret) : r),
+    () => new Promise<Resolution>(() => {}),
+  );
+
   const remaining = deadline(intent) - Date.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  // A late adapter rejection after the Default fires must not crash the process.
-  resolution.catch(() => {});
 
   const winner =
     remaining <= 0
       ? defaultResolution(intent, authoritySecret)
       : await Promise.race([
-          resolution,
+          guarded,
           new Promise<Resolution>((resolve) => {
             timer = setTimeout(() => resolve(defaultResolution(intent, authoritySecret)), remaining);
           }),

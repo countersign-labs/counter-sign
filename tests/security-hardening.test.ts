@@ -225,6 +225,25 @@ describe("a decision processed after the deadline is ignored (Codex re-review)",
     expect(pd.settle(i.intent_id, "approve", "m:alice", authority.secretKey)).toBeNull();
     expect(pd.size).toBe(0); // evicted — the Default now decides
   });
+
+  it("awaitWithDefault discards a late resolution from ANY adapter, not just PendingDecisions", async () => {
+    vi.useFakeTimers();
+    const i = intent(1); // default: reject
+    let resolveAdapter!: (r: Resolution) => void;
+    const adapterPromise = new Promise<Resolution>((res) => (resolveAdapter = res)); // a custom adapter's promise
+    const pending = awaitWithDefault(i, adapterPromise, authority.secretKey); // remaining > 0: schedules the timer
+    // Simulate a stall: clock jumps past the deadline (timers overdue, not fired),
+    // then a late but validly-signed approval resolves the adapter promise.
+    vi.setSystemTime(deadline(i) + 1);
+    resolveAdapter({
+      decision: "approve",
+      policy: "approver",
+      countersignatures: [signDecision(i, "approve", "m:alice", authority.secretKey)],
+    });
+    const r = await pending;
+    expect(r.decision).toBe("reject"); // the Default wins; the late approval is discarded
+    expect(r.policy).toBe("default");
+  });
 });
 
 describe("timeout still yields a signed Default with the reaper active (Codex #2)", () => {

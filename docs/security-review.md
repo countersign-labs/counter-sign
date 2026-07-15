@@ -238,3 +238,10 @@ A re-review after those fixes found one more:
   and authorize after the review window closed — contra spec §4 ("any decision
   arriving after the deadline MUST be ignored"). `settle` now evicts and ignores
   any decision observed at/after `deadline(intent)`, so the signed Default wins.
+- **CS-18 · The core timeout race lacked the deadline gate for non-PendingDecisions
+  adapters (High) — FIXED.** The CS-17 gate lived in `PendingDecisions.settle`, so
+  a *custom* `Adapter` (not using that helper) could still resolve a late approval
+  that beat the Default in `awaitWithDefault`'s race. The gate now lives in
+  `awaitWithDefault` itself: the adapter resolution is wrapped so any decision
+  observed at/after the deadline is replaced by the Default, enforcing the rule for
+  every Adapter implementation (settle keeps its gate as defense-in-depth).

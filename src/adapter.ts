@@ -30,19 +30,24 @@ export interface Adapter {
   close?(): Promise<void> | void;
 }
 
-/** What recording one decision did to a pending Intent. */
-export interface SettleResult {
+/** Fields common to every settle outcome. */
+interface SettleBase {
   /** the receipt just produced for this decision */
   countersignature: Countersignature;
-  /** "resolved" once quorum is met or a veto lands; "pending" while more approvals are needed */
-  status: "pending" | "resolved";
   /** distinct approvals collected so far */
   collected: number;
   /** distinct approvals required */
   quorum: number;
-  /** the final decision, present when status === "resolved" */
-  decision?: Decision;
 }
+
+/**
+ * What recording one decision did to a pending Intent. Discriminated on
+ * `status`: a "resolved" result always carries the final `decision`, a
+ * "pending" one never does — so callers can read `decision` without a guard.
+ */
+export type SettleResult =
+  | (SettleBase & { status: "pending" })
+  | (SettleBase & { status: "resolved"; decision: Decision });
 
 interface PendingEntry {
   intent: Intent;

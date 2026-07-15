@@ -382,6 +382,57 @@ describe("webhook authentication is enforced before any payload is trusted", () 
     }
   });
 
+  it("discord: a non-approver's click neither resolves the request nor strips the buttons (CS-27)", async () => {
+    interceptFetch(() => ({ id: "msg1" }));
+    const appKey = generateKeypair();
+    const adapter = new DiscordAdapter({
+      botToken: "t",
+      channelId: "c",
+      publicKey: fromB64url(appKey.publicKey).toString("hex"),
+      authorityKey: authority.secretKey,
+    });
+    const { server, base } = await listen(adapter.interactionHandler());
+    const click = async (userId: string, decision: string, intent: Intent) => {
+      const body = JSON.stringify({
+        type: 3,
+        data: { custom_id: `cs:${intent.intent_id}:${decision}` },
+        member: { user: { id: userId } },
+        message: { content: "intent", components: [{ type: 1, components: [{ type: 2 }] }] },
+      });
+      const ts = String(Math.floor(Date.now() / 1000));
+      const sig = fromB64url(signBytes(appKey.secretKey, utf8(ts + body))).toString("hex");
+      const res = await fetch(base, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-signature-ed25519": sig, "x-signature-timestamp": ts },
+        body,
+      });
+      return res.json();
+    };
+    try {
+      const intent = makeIntent(["discord:approver"]);
+      await adapter.deliver(intent);
+      const pending = adapter.awaitResolution(intent);
+      let resolved = false;
+      void pending.then(() => (resolved = true), () => {});
+
+      // A channel member who is NOT an approver clicks Approve.
+      const intruder = await click("intruder", "approve", intent);
+      // Must not falsely claim resolution and must not strip the approver's buttons.
+      expect(JSON.stringify(intruder)).not.toMatch(/Resolved/i);
+      expect(intruder.data?.components ?? null).not.toEqual([]);
+      await new Promise((r) => setTimeout(r, 15));
+      expect(resolved).toBe(false); // request is still open
+
+      // The real approver can still decide — the request was not griefed.
+      await click("approver", "approve", intent);
+      const r = await pending;
+      expect(r.decision).toBe("approve");
+    } finally {
+      server.close();
+      adapter.close();
+    }
+  });
+
   it("whatsapp: answers the GET verification challenge only for the right token", async () => {
     const adapter = new WhatsAppAdapter({
       accessToken: "t",

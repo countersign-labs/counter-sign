@@ -116,32 +116,46 @@ export class DiscordAdapter implements Adapter {
         }
         if (interaction.type === 3) {
           const parsed = parseDecisionPayload(interaction.data?.custom_id ?? "");
-          if (parsed && this.pending.has(parsed.intentId)) {
-            const user = interaction.member?.user ?? interaction.user;
-            const actor = `discord:${user?.id ?? "unknown"}`;
-            const result = this.pending.settle(parsed.intentId, parsed.decision, actor, this.cfg.authorityKey);
-            const base = interaction.message?.content ?? "";
-            if (result && result.status === "pending") {
-              // Keep the buttons so other approvers can still complete the quorum.
-              json({
-                type: 7,
-                data: {
-                  content: `${base}\n\nApproval ${result.collected}/${result.quorum} by <@${user?.id}> — awaiting more`,
-                  components: interaction.message?.components ?? [],
-                },
-              });
-              return;
+          const user = interaction.member?.user ?? interaction.user;
+          if (!parsed || !this.pending.has(parsed.intentId)) {
+            json({ type: 7, data: { content: "Request no longer pending.", components: [] } });
+            return;
+          }
+          const actor = `discord:${user?.id ?? "unknown"}`;
+          const result = this.pending.settle(parsed.intentId, parsed.decision, actor, this.cfg.authorityKey);
+          const base = interaction.message?.content ?? "";
+          if (!result) {
+            // settle ignored the click. If the request is STILL pending, the clicker
+            // is not one of the Intent's approvers — reply privately and leave the
+            // message and its buttons untouched, so a real approver keeps their say
+            // (a non-approver must not be able to grief the request by stripping the
+            // buttons or faking a resolution). Otherwise the request just closed
+            // (deadline or another decision) — remove the now-dead buttons.
+            if (this.pending.has(parsed.intentId)) {
+              json({ type: 4, data: { content: "You are not an approver for this request.", flags: 64 } });
+            } else {
+              json({ type: 7, data: { content: `${base}\n\nThis request is closed.`, components: [] } });
             }
+            return;
+          }
+          if (result.status === "pending") {
+            // Keep the buttons so other approvers can still complete the quorum.
             json({
-              type: 7, // UPDATE_MESSAGE: strip the buttons now that it is resolved
+              type: 7,
               data: {
-                content: `${base}\n\nResolved: ${(result?.decision ?? parsed.decision).toUpperCase()} (last: <@${user?.id}>)`,
-                components: [],
+                content: `${base}\n\nApproval ${result.collected}/${result.quorum} by <@${user?.id}> — awaiting more`,
+                components: interaction.message?.components ?? [],
               },
             });
             return;
           }
-          json({ type: 7, data: { content: "Request no longer pending.", components: [] } });
+          json({
+            type: 7, // UPDATE_MESSAGE: strip the buttons now that it is resolved
+            data: {
+              content: `${base}\n\nResolved: ${result.decision.toUpperCase()} (last: <@${user?.id}>)`,
+              components: [],
+            },
+          });
           return;
         }
         json({ type: 4, data: { content: "Unsupported interaction." } });

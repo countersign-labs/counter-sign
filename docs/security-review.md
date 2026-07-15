@@ -228,3 +228,13 @@ all now fixed with regression tests in `tests/security-hardening.test.ts`:
   new `readBody` cap threw into a `void`-launched handler with no `.catch`, risking
   an unhandled rejection on an oversized body. Added the outer catch the other
   adapters already had.
+
+A re-review after those fixes found one more:
+
+- **CS-17 · A decision processed after the deadline could beat the Default (High)
+  — FIXED.** `PendingDecisions.settle` did not check the deadline; if the event
+  loop stalled past expiry (process suspend, GC pause, sleep), a late approval
+  processed before the overdue reaper fired could win the `awaitWithDefault` race
+  and authorize after the review window closed — contra spec §4 ("any decision
+  arriving after the deadline MUST be ignored"). `settle` now evicts and ignores
+  any decision observed at/after `deadline(intent)`, so the signed Default wins.

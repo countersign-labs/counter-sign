@@ -115,6 +115,15 @@ export class PendingDecisions {
   settle(intentId: string, decision: Decision, actor: string, authoritySecret: string): SettleResult | null {
     const entry = this.entries.get(intentId);
     if (!entry) return null;
+    // Past the deadline the Default has authority (spec §4). Gate on the clock, not
+    // just the reaper timer: if the event loop stalled past expiry, the reaper is
+    // overdue but the entry is still here, and a late decision processed before it
+    // fires must NOT beat the timeout. Evict and ignore.
+    if (Date.now() >= deadline(entry.intent)) {
+      clearTimeout(entry.timer);
+      this.entries.delete(intentId);
+      return null;
+    }
     // Only the Intent's named approvers can decide. An unlisted actor's click is
     // ignored — it neither counts toward quorum nor vetoes — so channel membership
     // is not authority. (The timeout Default is signed elsewhere, not via settle.)

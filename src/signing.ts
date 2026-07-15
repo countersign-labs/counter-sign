@@ -9,7 +9,7 @@
 // is POSTed back. The server never holds the approver's key — it only relays and
 // verifies (via PendingDecisions.record), so it cannot forge a keyed approval.
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { PendingDecisions, readBody } from "./adapter.js";
 import { canonicalize } from "./core/canonical.js";
@@ -68,6 +68,19 @@ function challengeFor(unsigned: object): string {
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
+/**
+ * Serialize for embedding inside a <script> block. JSON.stringify does NOT escape
+ * `</script>` or the U+2028/U+2029 line terminators, so an attacker-influenced
+ * field (e.g. intent.summary) could break out of the script context — a stored
+ * XSS. Escaping `<` (and the separators) closes that.
+ */
+function scriptJson(obj: unknown): string {
+  // Escape sequences that can break out of a <script> block: `<` (so `</script>`
+  // and `<!--` are inert) and the U+2028/U+2029 line terminators (invalid inside JS
+  // string literals). JSON.stringify escapes none of these.
+  return JSON.stringify(obj).replace(/[<\u2028\u2029]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 }
 
 export class SigningServer {
@@ -140,7 +153,16 @@ export class SigningServer {
       challengeApprove: challengeFor(unsignedReceipt(intent.intent_id, "approve", approver.actor, cred, ts)),
       challengeReject: challengeFor(unsignedReceipt(intent.intent_id, "reject", approver.actor, cred, ts)),
     };
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(page(null, JSON.stringify(data)));
+    // Defense-in-depth CSP: only our nonce'd inline script may run; block objects,
+    // base-uri, and framing. The scriptJson escaping is the primary XSS defense.
+    const nonce = randomBytes(16).toString("base64");
+    res
+      .writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+        "x-content-type-options": "nosniff",
+      })
+      .end(page(null, scriptJson(data), nonce));
   }
 
   private async post(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -180,7 +202,7 @@ function deadlineOf(intent: Intent): number {
 }
 
 /** The self-contained signing page. `dataJson` seeds the WebAuthn ceremony. */
-function page(errorMessage: string | null, dataJson: string): string {
+function page(errorMessage: string | null, dataJson: string, nonce = ""): string {
   if (errorMessage) return `<!doctype html><meta charset=utf-8><title>counter-sign</title><body style="font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem"><h1>counter-sign</h1><p>${esc(errorMessage)}</p></body>`;
   // Inline, no external resources (matches the repo's no-CDN posture).
   return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Approve — counter-sign</title>
@@ -193,7 +215,7 @@ function page(errorMessage: string | null, dataJson: string): string {
   <button id=reject style="flex:1;padding:.7rem;border:0;border-radius:.5rem;background:#b3261e;color:#fff;font-size:1rem">Reject</button>
 </div>
 <p id=status style="margin-top:1rem;min-height:1.5rem"></p>
-<script>
+<script nonce="${esc(nonce)}">
 const D = ${dataJson};
 const token = new URLSearchParams(location.search).get("token");
 const b64urlToBytes = s => Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/").padEnd(Math.ceil(s.length/4)*4,"=")), c=>c.charCodeAt(0));

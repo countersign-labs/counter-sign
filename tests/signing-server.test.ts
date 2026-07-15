@@ -110,6 +110,26 @@ describe("SigningServer GET/POST", () => {
     expect(post.status).toBe(400);
   });
 
+  it("escapes a malicious intent summary so it cannot break out of the <script> block (XSS)", async () => {
+    const pending = new PendingDecisions();
+    const { approver } = passkeyApprover("m:ceo");
+    const evil = '</script><script>window.__xss=1</script>';
+    const i = createIntent({ action: "a", summary: evil, risk_tier: "low", approvers: [approver], timeout: 300, default: "reject" }, agent);
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    void signer.awaitResolution(i);
+    const url = signer.signingUrl(i, "m:ceo").replace(origin, base);
+    const resp = await fetch(url);
+    const html = await resp.text();
+    // The `<` from the summary is escaped inside the data blob; the injected tags are inert.
+    expect(html).not.toContain(evil);
+    expect(html).toContain("\\u003c/script>");
+    // Defense-in-depth CSP present, and the inline script is nonce'd.
+    expect(resp.headers.get("content-security-policy")).toMatch(/script-src 'nonce-/);
+    expect(html).toMatch(/<script nonce="[^"]+">/);
+  });
+
   it("GET with an invalid/expired token shows an error page (410)", async () => {
     const pending = new PendingDecisions();
     const { server } = makeServer(pending);

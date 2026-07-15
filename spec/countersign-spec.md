@@ -1,6 +1,6 @@
 # counter-sign — an open protocol for agent-to-human authorization
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Author:** Haridarman Kumaresan
 **Sponsor:** Agentsstack Pte. Ltd.
 **License:** This specification text is licensed under CC BY 4.0 (see [/LICENSE-CC-BY-4.0.txt](../LICENSE-CC-BY-4.0.txt)). Reference code is licensed separately under Apache-2.0.
@@ -26,13 +26,13 @@ may authorize it, and what happens if nobody answers.
 
 | Field        | Type            | Meaning |
 | ------------ | --------------- | ------- |
-| `countersign`| string          | Protocol version. MUST be `"0.1"`. |
+| `countersign`| string          | Protocol version. MUST be `"0.2"`. |
 | `intent_id`  | string (UUID)   | Unique id of this intent. MUST NOT be reused. |
 | `agent`      | object          | `{ id, public_key }` — identity string and base64url raw ed25519 public key of the requesting agent. |
 | `action`     | string          | Machine-oriented action name (e.g. `billing.refund`). |
 | `summary`    | string          | Human-oriented one-liner. This is what the approver decides on; it MUST be truthful about `action`. |
 | `risk_tier`  | enum            | `low` \| `medium` \| `high` \| `critical`. |
-| `approvers`  | object[]        | Who may countersign. Each is `{ actor, mode, public_key? }`: `actor` is a `channel:address` string (e.g. `telegram:8675309`); `mode` is `vouched` (the authority signs on their behalf — the button flow) or `keyed` (the approver signs their own receipt with `public_key`, which the authority never holds). A bare string is shorthand for a `vouched` approver. MUST be non-empty. |
+| `approvers`  | object[]        | Who may countersign. Each is `{ actor, mode, public_key? }`: `actor` is a `channel:address` string (e.g. `telegram:8675309`); `mode` is `vouched` (the authority signs on their behalf — the button flow) or `keyed` (the approver signs their own receipt with `public_key`, which the authority never holds). A bare string passed to `createIntent` is shorthand for a `vouched` approver and is normalized to an object in the signed envelope (the wire form is always objects). MUST be non-empty. |
 | `quorum`     | integer         | Number of **distinct** approvers whose `approve` is required to authorize. MUST be ≥ 1. Optional; absent means `1`. |
 | `timeout`    | integer         | Seconds after `created_at` at which the Default fires. MUST be ≥ 1. |
 | `default`    | enum            | `approve` \| `reject` — the decision that fires at the deadline. |
@@ -44,7 +44,7 @@ may authorize it, and what happens if nobody answers.
 `context || 0x0A || canonical`, where `canonical` is the canonical JSON of the
 envelope with the `signature` field absent and `context` is a
 domain-separation label unique to the artifact type
-(`countersign-intent-v0.1` for an Intent). Canonical JSON means: object keys
+(`countersign-intent-v0.2` for an Intent). Canonical JSON means: object keys
 sorted lexicographically at every depth, no insignificant whitespace, UTF-8
 encoding. Domain separation MUST be used so a signature minted for one
 artifact type (Intent, Countersignature, or an email decision link) can never
@@ -127,7 +127,7 @@ artifact in the protocol that conveys authority.
 
 | Field        | Type          | Meaning |
 | ------------ | ------------- | ------- |
-| `countersign`| string        | MUST be `"0.1"`. |
+| `countersign`| string        | MUST be `"0.2"`. |
 | `intent_id`  | string (UUID) | The Intent being decided. |
 | `decision`   | enum          | `approve` \| `reject`. |
 | `actor`      | string        | Who decided, as `channel:address` (e.g. `slack:U024BE7LH`); `default:timeout` when the Default fired. |
@@ -137,7 +137,7 @@ artifact in the protocol that conveys authority.
 | `signature`  | string        | base64url ed25519 signature over the canonical receipt (without this field). |
 
 Signing and canonicalization are as in §1 (the Countersignature context is
-`countersign-countersignature-v0.1`). A Countersignature MUST be
+`countersign-countersignature-v0.2`). A receipt for a `keyed` approver is signed by the approver's OWN key (raw ed25519, or a WebAuthn passkey — then it carries a `webauthn` block whose assertion challenge binds the canonical receipt digest); a `vouched` receipt and the timeout Default are signed by the authority key. A Countersignature MUST be
 **portable**: any party holding only the receipt (and, to bind it, the
 Intent with the matching `intent_id`) can verify it offline. Verifiers MUST
 check: (1) the signature verifies against the embedded `public_key`, (2) the

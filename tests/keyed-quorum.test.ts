@@ -139,6 +139,30 @@ describe("keyed quorum — negative (a compromised authority key cannot forge it
     expect(() => verifyResolution(i, r, authPub)).toThrow(/authority key/);
   });
 
+  it("refuses one key material across a raw-keyed AND a passkey slot (cross-encoding twin)", () => {
+    // The raw ed25519 key K and the passkey descriptor webauthn-ed25519:K are the
+    // SAME key — one holder could satisfy both, so they must not be two slots.
+    expect(() =>
+      createIntent(
+        { action: "a", summary: "s", risk_tier: "low",
+          approvers: [keyed("m:alice", alice), { actor: "m:bob", mode: "keyed", public_key: `webauthn-ed25519:${alice.publicKey}` }],
+          quorum: 2, timeout: 60, default: "reject" },
+        agent,
+      ),
+    ).toThrow(/shares key material/);
+  });
+
+  it("refuses two approvers that normalize to the same actor", () => {
+    expect(() =>
+      createIntent(
+        { action: "a", summary: "s", risk_tier: "low",
+          approvers: [keyed("m:alice", alice), keyed("m:Alice ", bob)], // same normalized actor
+          quorum: 2, timeout: 60, default: "reject" },
+        agent,
+      ),
+    ).toThrow(/listed more than once/);
+  });
+
   it("createIntent refuses a keyed approver without a key, and duplicate keyed keys", () => {
     expect(() =>
       createIntent(
@@ -155,7 +179,7 @@ describe("keyed quorum — negative (a compromised authority key cannot forge it
         },
         agent,
       ),
-    ).toThrow(/more than one approver/);
+    ).toThrow(/shares key material/);
   });
 });
 

@@ -86,6 +86,8 @@ function scriptJson(obj: unknown): string {
 export class SigningServer {
   private readonly cfg: SigningServerConfig;
   private readonly authorityPublicKey: string;
+  /** normalized `intent_id\nactor` pairs already used to record a decision. */
+  private readonly consumed = new Set<string>();
 
   constructor(cfg: SigningServerConfig) {
     this.cfg = cfg;
@@ -177,6 +179,10 @@ export class SigningServer {
     }
     const token = verifySigningToken(body.token ?? "", this.authorityPublicKey);
     if (!token || Date.now() >= token.exp) return json(410, { error: "invalid or expired token" });
+    // Single-use per (intent, actor): once this approver has recorded a decision,
+    // the link is dead — no replaying the assertion, no approving-then-vetoing.
+    const useKey = `${token.intent_id}\n${normalizeActor(token.actor)}`;
+    if (this.consumed.has(useKey)) return json(410, { error: "this approval link has already been used" });
     if (body.decision !== "approve" && body.decision !== "reject") return json(400, { error: "bad decision" });
     if (typeof body.timestamp !== "string" || typeof body.signature !== "string" || typeof body.authenticator_data !== "string" || typeof body.client_data_json !== "string")
       return json(400, { error: "missing assertion fields" });
@@ -193,6 +199,7 @@ export class SigningServer {
     };
     const result = this.cfg.pending.record(receipt, this.cfg.webauthn);
     if (!result) return json(400, { error: "assertion did not verify or request not pending" });
+    this.consumed.add(useKey); // this approver's link is now spent
     return json(200, { status: result.status, decision: result.status === "resolved" ? result.decision : undefined, collected: result.collected, quorum: result.quorum });
   }
 }

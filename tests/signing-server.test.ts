@@ -88,6 +88,26 @@ describe("SigningServer GET/POST", () => {
     expect((await resolution).decision).toBe("approve");
   });
 
+  it("makes the signing link single-use — a replayed POST is refused (410)", async () => {
+    const pending = new PendingDecisions();
+    const { approver, sign } = passkeyApprover("m:ceo");
+    const i = intentWith([approver], 1);
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    void signer.awaitResolution(i);
+    const url = signer.signingUrl(i, "m:ceo").replace(origin, base);
+    const data = JSON.parse((await (await fetch(url)).text()).match(/const D = (\{.*?\});/s)![1]);
+    const token = new URL(url).searchParams.get("token");
+    const body = JSON.stringify({ token, decision: "approve", timestamp: data.timestamp, ...assertion(data.challengeApprove, sign) });
+
+    const first = await fetch(`${base}/sign`, { method: "POST", headers: { "content-type": "application/json" }, body });
+    expect(first.status).toBe(200);
+    const replay = await fetch(`${base}/sign`, { method: "POST", headers: { "content-type": "application/json" }, body });
+    expect(replay.status).toBe(410);
+    expect((await replay.json()).error).toMatch(/already been used/);
+  });
+
   it("rejects a tampered decision (assertion no longer binds)", async () => {
     const pending = new PendingDecisions();
     const { approver, sign } = passkeyApprover("m:ceo");

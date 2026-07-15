@@ -387,3 +387,26 @@ A follow-up Codex review of the CS-24 commit found the rebind was still incomple
 The layer-3 discard described under CS-22 above was subsequently rebound (CS-24,
 then CS-26) to fire only on an *authenticated* single `default:timeout` receipt,
 never on an unverified `policy` field or the unsigned `Resolution.policy`.
+
+An exhaustive multi-agent audit of the whole authorization core (6 lenses:
+unverified-trust, fail-open, deadline/timing, crypto/replay, quorum/distinctness,
+integration) returned **clean on the core** — the CS-17..CS-26 protections hold
+with no residual bypass — and surfaced one non-core UI bug:
+
+- **CS-27 · A non-approver's Discord click griefed the request (Low, UI
+  robustness/availability) — FIXED.** In `DiscordAdapter.interactionHandler`, an
+  unlisted channel member clicking a button caused `PendingDecisions.settle` to
+  return `null` (correctly ignored — no authorization happened), but the handler's
+  guard `result && result.status === "pending"` was false for `null`, so it fell
+  through to the resolved branch: it stripped the message's buttons
+  (`components: []`) and posted a misleading `Resolved: <whatever they clicked>`.
+  The core stayed fail-closed (no receipt, the Intent remained pending), but the
+  *real* approver could no longer decide via the UI, so the Intent would fall to
+  its Default at the deadline — for `default:"approve"`, effectively forcing the
+  action through without the approver ever getting to veto. Fixed: a `null` settle
+  on a still-pending request now replies with an ephemeral "you are not an
+  approver" and leaves the message and its buttons untouched; only a genuine
+  close (deadline/other resolution) removes the buttons; and the resolved message
+  now reports the authoritative `result.decision`, never the clicker's raw choice.
+  `SettleResult` was made a discriminated union (`status:"resolved"` ⇒ `decision`
+  present) so this can't regress silently. +1 adapter test.

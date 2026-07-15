@@ -7,8 +7,12 @@
 // the verifier's code.
 
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PendingDecisions } from "../src/adapter.js";
+import { ReceiptLog } from "../src/receipt-log.js";
 import { canonicalize } from "../src/core/canonical.js";
 import { signDecision } from "../src/core/countersignature.js";
 import { verifyResolution, awaitWithDefault } from "../src/core/defaults.js";
@@ -129,6 +133,17 @@ describe("passkey receipts verify through the keyed choke point", () => {
     const receipt = passkeyReceipt(i, "approve", "m:ceo", cred);
     expect(pd.record(receipt)).toBeNull(); // no policy → cannot verify → ignored
     expect(pd.record(receipt, policy)?.status).toBe("resolved");
+  });
+
+  it("ReceiptLog.verifyAll validates a logged passkey receipt only WITH the RP policy", async () => {
+    const cred = ed25519Credential();
+    const i = intentWith([keyedApprover("m:ceo", cred.credential)], 1);
+    const receipt = passkeyReceipt(i, "approve", "m:ceo", cred);
+    const log = new ReceiptLog(join(mkdtempSync(join(tmpdir(), "cs-pk-log-")), "r.jsonl"));
+    await log.append(receipt);
+    expect((await log.verifyAll({ webauthn: policy })).ok).toBe(true);
+    // Without the policy, a passkey receipt cannot be verified → flagged, not silently valid.
+    expect((await log.verifyAll()).faults.some((f) => f.reason === "invalid-signature")).toBe(true);
   });
 
   it("HEADLINE holds: the authority key cannot forge a passkey slot", async () => {

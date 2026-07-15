@@ -100,6 +100,11 @@ describe("verifyWebAuthnAssertion — negative (each check fails closed)", () =>
     expect(verifyWebAuthnAssertion(a.assertion, a.signature, opts(a.credential))).toBe(false);
   });
 
+  it("rejects an assertion made in a cross-origin frame", () => {
+    const a = p256Assertion({ client: { crossOrigin: true } });
+    expect(verifyWebAuthnAssertion(a.assertion, a.signature, opts(a.credential))).toBe(false);
+  });
+
   it("rejects a tampered signature", () => {
     const a = p256Assertion();
     const bad = toB64url(Buffer.concat([fromB64url(a.signature).subarray(0, -1), Buffer.from([0xff])]));

@@ -32,7 +32,7 @@ may authorize it, and what happens if nobody answers.
 | `action`     | string          | Machine-oriented action name (e.g. `billing.refund`). |
 | `summary`    | string          | Human-oriented one-liner. This is what the approver decides on; it MUST be truthful about `action`. |
 | `risk_tier`  | enum            | `low` \| `medium` \| `high` \| `critical`. |
-| `approvers`  | string[]        | Who may countersign, as `channel:address` strings (e.g. `telegram:8675309`, `email:ops@example.com`). MUST be non-empty. |
+| `approvers`  | object[]        | Who may countersign. Each is `{ actor, mode, public_key? }`: `actor` is a `channel:address` string (e.g. `telegram:8675309`); `mode` is `vouched` (the authority signs on their behalf — the button flow) or `keyed` (the approver signs their own receipt with `public_key`, which the authority never holds). A bare string is shorthand for a `vouched` approver. MUST be non-empty. |
 | `quorum`     | integer         | Number of **distinct** approvers whose `approve` is required to authorize. MUST be ≥ 1. Optional; absent means `1`. |
 | `timeout`    | integer         | Seconds after `created_at` at which the Default fires. MUST be ≥ 1. |
 | `default`    | enum            | `approve` \| `reject` — the decision that fires at the deadline. |
@@ -67,17 +67,20 @@ reached can never be satisfied and will always resolve to the Default. A
 self-defeating, since a timeout would authorize the action without the
 required approvers. For a quorum, the Default is therefore always `reject`.
 
-**Trust model (important).** In this version, distinctness is counted over the
-`actor` strings the **authority** vouches for; approvers are not separately
-keyed. A quorum therefore protects against an *under-count* — an adapter
-presenting fewer than `quorum` receipts, a repeated approver, or a decision
-mislabelled to skip the check — but it does **not** provide cryptographic
-separation of duty: a party in possession of the single authority key can mint
-`quorum` receipts with distinct `actor` values. Four-eyes here is a control the
-*trusted authority* enforces, not one the mathematics enforces against that
-authority. Deployments that need multi-party separation of duty SHOULD bind each
-approver to a distinct key and require one verifying receipt per key — a
-per-approver-key quorum is a planned extension (see §6).
+**Trust model (important).** As of v0.2, `quorum > 1` requires every approver to
+be **`keyed`**: each signs their own receipt with their own key, which the
+authority never holds, so a party in possession of the authority key **cannot**
+forge the quorum — four-eyes is now cryptographic separation of duty, not a count
+the single authority vouches for. (A `vouched` approver, whose receipt the
+authority signs on a button press, remains available for a single approver, where
+separation of duty does not apply; mixing a `vouched` slot into a `quorum > 1` is
+rejected, since it would reintroduce a server-forgeable slot.) A keyed receipt is
+verified against the approver's `public_key` as bound in the **agent-signed**
+Intent, so a compromised authority key can neither forge the receipt nor swap the
+bound key. The remaining trust anchors are the agent key (kept distinct from the
+authority key, §5) and the *source* of approver keys — a per-approver enrollment
+registry is the next hardening step (§6). The human passkey/WebAuthn signing UX is
+layered on top of this; the raw-key signer is the base.
 
 ## 2. Route
 
@@ -235,21 +238,22 @@ the Default fires.
 
 ## 6. Versioning
 
-This is version 0.1, a draft for implementation feedback. The `countersign`
+This is version 0.2, a draft for implementation feedback. The `countersign`
 field pins the version in every envelope and receipt. Breaking changes bump
 the minor version until 1.0. Anything not specified here — approver
 directories, delegation chains, revocation — is deliberately left to
 implementations for now.
 
-Two hardening items are explicitly **planned** (and called out where the
-current design is weaker than a reader might assume): **per-approver-key
-quorum** — binding each approver to a distinct key so M-of-N is cryptographic
-separation of duty rather than a count the single authority vouches for (§1
-"Trust model", §3); and a **keyed, self-anchoring receipt log** — a signed head
-per append so an append-only audit trail is tamper-evident without an external
-anchor. Until then, deployments needing those properties should apply the
-mitigations noted in-line (distinct approver keys; an externally-anchored log
-head).
+**Delivered in v0.2:** **per-approver-key quorum** — binding each approver to a
+distinct key (the `keyed` mode) so M-of-N is cryptographic separation of duty
+rather than a count the single authority vouches for (§1 "Trust model"). The
+base signer is raw ed25519; human passkey/WebAuthn signing and an approver
+enrollment registry are being layered on next.
+
+One hardening item remains explicitly **planned**: a **keyed, self-anchoring
+receipt log** — a signed head per append so an append-only audit trail is
+tamper-evident without an external anchor. Until then, deployments needing that
+property should externally anchor the log head.
 
 ---
 

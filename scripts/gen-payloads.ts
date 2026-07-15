@@ -16,6 +16,7 @@ mkdirSync(dir, { recursive: true });
 const agent = { id: "agent:example", keypair: generateKeypair() };
 const authority = generateKeypair().secretKey;
 
+// A single-approver, vouched Intent — the frictionless button flow.
 const intent = createIntent(
   {
     action: "billing.refund",
@@ -29,12 +30,19 @@ const intent = createIntent(
   agent,
 );
 
+// A two-person (four-eyes) Intent. quorum > 1 requires KEYED approvers, so each
+// manager signs with their own key — a compromised server cannot forge the quorum.
+const alice = generateKeypair();
+const bob = generateKeypair();
 const quorumIntent = createIntent(
   {
     action: "prod.deploy",
     summary: "Deploy release 2.4.0 to production (two-person rule)",
     risk_tier: "critical",
-    approvers: ["slack:U024BE7LH", "slack:U07QX9ZLE", "telegram:8675309"],
+    approvers: [
+      { actor: "slack:U024BE7LH", mode: "keyed", public_key: alice.publicKey },
+      { actor: "slack:U07QX9ZLE", mode: "keyed", public_key: bob.publicKey },
+    ],
     quorum: 2,
     timeout: 600,
     default: "reject",
@@ -43,8 +51,12 @@ const quorumIntent = createIntent(
   agent,
 );
 
+// Vouched receipts (authority-signed) over the single-approver Intent.
 const approved = signDecision(intent, "approve", "telegram:8675309", authority);
 const rejected = signDecision(intent, "reject", "email:ops@example.com", authority);
+// A KEYED receipt — approver Alice signs her own approval with HER key (not the
+// authority key), so it verifies independently and the server cannot forge it.
+const keyed = signDecision(quorumIntent, "approve", "slack:U024BE7LH", alice.secretKey, "approver");
 // The vector represents a timeout that has already fired. Advance the guard's
 // wall clock to the exact deadline so defaultResolution mints a conforming,
 // on-time receipt without making payload generation wait five minutes.
@@ -67,4 +79,5 @@ write("intent.example.json", intent);
 write("intent.quorum.example.json", quorumIntent);
 write("countersignature.approve.example.json", approved);
 write("countersignature.reject.example.json", rejected);
+write("countersignature.keyed.example.json", keyed);
 write("countersignature.default-timeout.example.json", timedOut);

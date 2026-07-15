@@ -1,10 +1,10 @@
 {
-  "countersign": "0.1",
-  "intent_id": "16f911ac-da2d-4444-be55-3eb168010b81",
+  "countersign": "0.2",
+  "intent_id": "80066a51-e432-4ad9-b4f6-89c51987c200",
   "decision": "reject",
   "actor": "default:timeout",
   "policy": "default",
-  "timestamp": "2026-07-15T17:37:42.612Z",
-  "public_key": "AiVV-LjP0rn16fLCtpcozjKednsJ_ht0gzWlUGJXQzs",
-  "signature": "bOKdsgpcyP3kgsCyI9JEcF6ujct6gHhInIWWdysQKtmI0LdhhRQrxZ1bbrwf4BXsfLc2V0kTj-0ucxAj2RHlCA"
+  "timestamp": "2026-07-15T22:28:18.894Z",
+  "public_key": "rHAIyAJb-xjsv-r27Y-BMgsrIDI2dq8AXNKANh9_DvA",
+  "signature": "v_ctFEmjtJymH_mge0MsqBNm3b9eeGLshWS1CXjv0Ff5x0QpQnhd5wCBtP4x114RUI8skjvcQKR3rTtC9wMhCQ"
 }

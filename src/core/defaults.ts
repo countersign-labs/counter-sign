@@ -6,7 +6,7 @@ import { normalizeActor, signDecision, verifyCountersignature } from "./counters
 import { CountersignError, InvalidCountersignatureError } from "./errors.js";
 import { assertIntentInvariants, quorumOf, verifyIntent } from "./intent.js";
 import { publicKeyFromSecret } from "./keys.js";
-import type { Intent, Resolution } from "./types.js";
+import type { Approver, Intent, Resolution } from "./types.js";
 
 /** Node's setTimeout ceiling (2^31-1 ms ≈ 24.8 days); larger delays clamp to ~1 ms. */
 const MAX_TIMER_MS = 2_147_483_647;
@@ -89,14 +89,15 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
   if (resolution.decision !== "approve" && resolution.decision !== "reject")
     throw new InvalidCountersignatureError(`resolution for ${intent.intent_id} has invalid decision ${JSON.stringify(resolution.decision)}`);
 
+  // Structural checks shared by every receipt: identity and decision consistency.
+  // Signature verification is done PER RECEIPT below, against the key its
+  // approver's MODE requires — the authority key for a `vouched` receipt (or the
+  // Default), the approver's OWN bound key for a `keyed` receipt. A blanket
+  // authority-key check here would be wrong now that keyed receipts exist.
   for (const cs of receipts) {
     if (cs.intent_id !== intent.intent_id)
       throw new InvalidCountersignatureError(
         `receipt intent_id ${cs.intent_id} does not match intent ${intent.intent_id}`,
-      );
-    if (!verifyCountersignature(cs, { trustedKeys: expectedAuthorityPublicKey }))
-      throw new InvalidCountersignatureError(
-        `a receipt for ${intent.intent_id} was not signed by the expected authority (got ${cs.public_key})`,
       );
     // Every receipt's OWN decision must match the resolution's claimed decision,
     // so a set of `reject` receipts (e.g. the public timeout receipt) can never
@@ -114,17 +115,17 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
   // policy-checked, so an authority-signed reject from an actor outside the
   // allowlist — or under an unknown policy — could veto any operation.)
   if (resolution.policy === "approver") {
-    // Human decisions: EVERY receipt's actor MUST be named in the Intent's
-    // signed `approvers` allowlist. Without this, any actor the trusted
-    // authority vouches for (e.g. any member of the delivery channel) could
-    // decide — the signed `approvers` field would be decorative. A veto is as
-    // much an exercise of authority as an approval.
-    // `default:timeout` is reserved for the runtime's timeout Default and can
-    // never be a human approver, even if a hostile Intent lists a normalized
-    // variant of it in `approvers`.
-    const allow = new Set(
-      intent.approvers.map(normalizeActor).filter((actor) => actor !== DEFAULT_TIMEOUT_ACTOR),
-    );
+    // Human decisions: EVERY receipt's actor MUST be named in the Intent's signed
+    // `approvers` allowlist, and each receipt is verified against the key its
+    // approver's MODE requires. A `keyed` approver's receipt must be signed by
+    // their OWN bound key — the authority key cannot forge it, which is the
+    // cryptographic separation of duty; a `vouched` receipt by the authority key.
+    // `default:timeout` is reserved and can never be a human approver.
+    const byActor = new Map<string, Approver>();
+    for (const a of intent.approvers) {
+      const na = normalizeActor(a.actor);
+      if (na !== DEFAULT_TIMEOUT_ACTOR) byActor.set(na, a);
+    }
     const distinct = new Set<string>();
     for (const cs of receipts) {
       // Resolution.policy is unsigned wrapper metadata. Bind this proof to the
@@ -139,9 +140,22 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
         throw new InvalidCountersignatureError(
           `${resolution.decision} resolution for ${intent.intent_id} uses reserved actor default:timeout as an approver`,
         );
-      if (!allow.has(actor))
+      const approver = byActor.get(actor);
+      if (!approver)
         throw new InvalidCountersignatureError(
           `${resolution.decision} resolution for ${intent.intent_id} has a receipt from ${cs.actor}, who is not in the Intent's approvers`,
+        );
+      let trustedKey: string;
+      if (approver.mode === "keyed") {
+        if (!approver.public_key)
+          throw new InvalidCountersignatureError(`keyed approver ${cs.actor} for ${intent.intent_id} has no bound key`);
+        trustedKey = approver.public_key;
+      } else {
+        trustedKey = expectedAuthorityPublicKey;
+      }
+      if (!verifyCountersignature(cs, { trustedKeys: trustedKey }))
+        throw new InvalidCountersignatureError(
+          `a ${approver.mode} receipt from ${cs.actor} for ${intent.intent_id} was not signed by the expected key (got ${cs.public_key})`,
         );
       distinct.add(actor);
     }
@@ -170,6 +184,12 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
       throw new InvalidCountersignatureError(
         `a default resolution for ${intent.intent_id} must be exactly one default:timeout receipt`,
       );
+    // The timeout Default is minted by the enforcing runtime, so it must be signed
+    // by the authority key (never an approver key).
+    if (!verifyCountersignature(receipts[0], { trustedKeys: expectedAuthorityPublicKey }))
+      throw new InvalidCountersignatureError(
+        `the timeout Default for ${intent.intent_id} was not signed by the expected authority (got ${receipts[0].public_key})`,
+      );
     // The Default fires AT the deadline, so its signed timestamp can never
     // precede it. Without this, an early-minted "timeout" receipt verifies —
     // a false timeout audit record, or an approval before the review window
@@ -192,19 +212,19 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
  *
  * Whatever comes back is bound to the caller's authority before it is
  * returned (see verifyResolution): the Intent must be valid and agent-signed,
- * every receipt MUST decide this exact `intent_id`, be signed by the key derived
- * from `authoritySecret`, and carry the resolution's own decision; an `approve`
- * MUST be backed by `quorum` distinct approvers (or be the narrow quorum-1
- * timeout Default), and a `reject` MUST come from a listed approver or be the
- * canonical timeout Default. This choke point stops an under-quorum, wrong-key,
- * decision-mismatched, policy-mislabelled, or unlisted-actor decision from
- * being accepted — integrity alone is not authority.
+ * every receipt MUST decide this exact `intent_id`, carry the resolution's own
+ * decision, and be signed by the key its approver's MODE requires — the authority
+ * key (from `authoritySecret`) for a `vouched` receipt or the timeout Default,
+ * the approver's OWN bound key for a `keyed` receipt. An `approve` MUST be backed
+ * by `quorum` distinct approvers (or be the narrow quorum-1 timeout Default), and
+ * a `reject` MUST come from a listed approver or be the canonical timeout Default.
  *
- * It does NOT provide separation of duty against the authority key itself:
- * distinctness is over `actor` strings the authority vouches for, so a holder of
- * that key can still mint `quorum` distinct receipts. The adapter that produces
- * decisions MUST sign with the same authority key passed here, and MUST be
- * trusted to map real humans to actors. See the spec §1 "Trust model".
+ * For a `keyed` quorum (required when `quorum > 1`), this DOES provide
+ * cryptographic separation of duty against the authority key: keyed receipts are
+ * signed by approver keys the authority never holds, so a holder of the authority
+ * key cannot forge the quorum. The residual trust is the agent key (which binds
+ * each approver's key into the signed Intent, and MUST be distinct from the
+ * authority key) and the source of those keys. See the spec §1 "Trust model".
  */
 export async function awaitWithDefault(
   intent: Intent,

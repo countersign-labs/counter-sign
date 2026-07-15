@@ -12,8 +12,8 @@ import { awaitWithDefault, deadline, defaultResolution, verifyResolution } from 
 import { wrapAction } from "../src/shim.js";
 import { InvalidCountersignatureError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
-import { generateKeypair, publicKeyFromSecret } from "../src/core/keys.js";
-import type { Intent, Resolution } from "../src/core/types.js";
+import { generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
+import type { Approver, Intent, Resolution } from "../src/core/types.js";
 import { LocalAdapter } from "../src/adapters/local.js";
 import { TelegramAdapter } from "../src/adapters/telegram.js";
 import { WhatsAppAdapter } from "../src/adapters/whatsapp.js";
@@ -22,9 +22,26 @@ const agent = { id: "agent:test", keypair: generateKeypair() };
 const authority = generateKeypair();
 const authPub = publicKeyFromSecret(authority.secretKey);
 
+// Stable per-actor keypairs for keyed approvers (quorum > 1 requires keyed).
+const approverKeys = new Map<string, Keypair>();
+function keyOf(actor: string): Keypair {
+  let kp = approverKeys.get(actor);
+  if (!kp) { kp = generateKeypair(); approverKeys.set(actor, kp); }
+  return kp;
+}
+function keyed(actor: string): Approver {
+  return { actor, mode: "keyed", public_key: keyOf(actor).publicKey };
+}
+/** A receipt signed by the keyed approver's OWN key. */
+function keyedReceipt(i: Intent, decision: "approve" | "reject", actor: string) {
+  return signDecision(i, decision, actor, keyOf(actor).secretKey, "approver");
+}
+
 function intent(quorum: number, over: Partial<Parameters<typeof createIntent>[0]> = {}): Intent {
+  const approvers =
+    over.approvers ?? (quorum > 1 ? [keyed("m:alice"), keyed("m:bob"), keyed("m:carol")] : ["m:alice", "m:bob", "m:carol"]);
   return createIntent(
-    { action: "prod.deploy", summary: "Deploy 2.4.0", risk_tier: "critical", approvers: ["m:alice", "m:bob", "m:carol"], quorum, timeout: 300, default: "reject", ...over },
+    { action: "prod.deploy", summary: "Deploy 2.4.0", risk_tier: "critical", timeout: 300, default: "reject", ...over, approvers, quorum },
     agent,
   );
 }
@@ -68,11 +85,11 @@ describe("BLOCKER: verifyResolution cannot be bypassed via resolution.policy", (
     vi.useRealTimers();
     expect(() => verifyResolution(da, legit, authPub)).not.toThrow();
 
-    const q = intent(2);
+    const q = intent(2); // keyed approvers — each signs with their own key
     const humans: Resolution = {
       decision: "approve",
       policy: "approver",
-      countersignatures: [signDecision(q, "approve", "m:alice", authority.secretKey), signDecision(q, "approve", "m:bob", authority.secretKey)],
+      countersignatures: [keyedReceipt(q, "approve", "m:alice"), keyedReceipt(q, "approve", "m:bob")],
     };
     expect(() => verifyResolution(q, humans, authPub)).not.toThrow();
   });
@@ -81,13 +98,16 @@ describe("BLOCKER: verifyResolution cannot be bypassed via resolution.policy", (
 describe("one human cannot fill a multi-person quorum via actor variants", () => {
   it("counts alice / Alice / 'alice ' as ONE distinct approver", () => {
     const i = intent(3);
+    // All three receipts are signed by the SAME keyed approver's key (m:alice),
+    // just with case/space-variant actor strings — they must collapse to 1 distinct.
+    const k = keyOf("m:alice").secretKey;
     const forged: Resolution = {
       decision: "approve",
       policy: "approver",
       countersignatures: [
-        signDecision(i, "approve", "m:alice", authority.secretKey),
-        signDecision(i, "approve", "m:Alice", authority.secretKey),
-        signDecision(i, "approve", "m:alice ", authority.secretKey),
+        signDecision(i, "approve", "m:alice", k, "approver"),
+        signDecision(i, "approve", "m:Alice", k, "approver"),
+        signDecision(i, "approve", "m:alice ", k, "approver"),
       ],
     };
     expect(() => verifyResolution(i, forged, authPub)).toThrow(/distinct approver/);
@@ -227,18 +247,20 @@ describe("only named approvers can decide (Codex #1)", () => {
   });
 });
 
-describe("settle keeps parity with verifyResolution's reserved-actor rule (Codex CS-24)", () => {
-  it("ignores an actor of default:timeout even if a hostile Intent lists it as an approver", () => {
-    // A hostile agent-signed Intent that names the reserved Default actor as an approver.
-    const i = intent(1, { approvers: ["m:alice", "default:timeout"], default: "approve" });
+describe("the reserved default:timeout actor can never be an approver (Codex CS-24)", () => {
+  it("createIntent refuses it, and settle ignores it even on a hand-crafted hostile wire Intent", () => {
+    // The primary defense: createIntent (and assertIntentInvariants) reject a
+    // reserved actor as an approver up front.
+    expect(() => intent(1, { approvers: ["m:alice", "default:timeout"] })).toThrow(/reserved/);
+    // Defense in depth: even a hand-crafted Intent that bypasses createIntent and
+    // lists it — settle's approverSet excludes the reserved actor, so it never decides.
+    const base = intent(1, { approvers: ["m:alice"] });
+    const hostile = { ...base, approvers: [...base.approvers, { actor: "default:timeout", mode: "vouched" as const }] };
     const pd = new PendingDecisions();
-    void pd.wait(i);
-    // settle must NOT let the reserved actor decide — parity with verifyResolution's choke-point check.
-    expect(pd.settle(i.intent_id, "approve", "default:timeout", authority.secretKey)).toBeNull();
-    // A normalized variant is refused too (same normalizeActor folding).
-    expect(pd.settle(i.intent_id, "approve", "Default:Timeout ", authority.secretKey)).toBeNull();
-    // A genuinely listed human still decides.
-    expect(pd.settle(i.intent_id, "approve", "m:alice", authority.secretKey)?.status).toBe("resolved");
+    void pd.wait(hostile);
+    expect(pd.settle(hostile.intent_id, "approve", "default:timeout", authority.secretKey)).toBeNull();
+    expect(pd.settle(hostile.intent_id, "approve", "Default:Timeout ", authority.secretKey)).toBeNull();
+    expect(pd.settle(hostile.intent_id, "approve", "m:alice", authority.secretKey)?.status).toBe("resolved");
   });
 });
 
@@ -405,20 +427,21 @@ describe("the Default cannot fire early (Codex CS-22)", () => {
   });
 
   it("verifyResolution requires every approver receipt's signed policy to be approver", () => {
-    const i = intent(2);
+    const i = intent(2); // keyed approvers — each receipt signed by its own key
     const relabelled: Resolution = {
       decision: "approve",
       policy: "approver",
       countersignatures: [
-        signDecision(i, "approve", "m:alice", authority.secretKey, "approver"),
-        signDecision(i, "approve", "m:bob", authority.secretKey, "default"),
+        keyedReceipt(i, "approve", "m:alice"),
+        signDecision(i, "approve", "m:bob", keyOf("m:bob").secretKey, "default"), // m:bob's key, wrong policy
       ],
     };
     expect(() => verifyResolution(i, relabelled, authPub)).toThrow(/signed policy.*not "approver"/);
   });
 
-  it("verifyResolution never treats default:timeout as an approver, even when the Intent lists it", () => {
-    const i = intent(1, { approvers: ["  DEFAULT:TIMEOUT  "] });
+  it("verifyResolution never treats a default:timeout RECEIPT as an approver (and createIntent refuses to list it)", () => {
+    expect(() => intent(1, { approvers: ["  DEFAULT:TIMEOUT  "] })).toThrow(/reserved/);
+    const i = intent(1, { approvers: ["m:alice"] });
     const forged: Resolution = {
       decision: "approve",
       policy: "approver",
@@ -429,7 +452,7 @@ describe("the Default cannot fire early (Codex CS-22)", () => {
 
   it("a relabelled signed Default cannot win awaitWithDefault before the deadline", async () => {
     vi.useFakeTimers();
-    const i = intent(1, { approvers: ["default:timeout"], default: "approve" });
+    const i = intent(1, { approvers: ["m:alice"], default: "approve" });
     const relabelled: Resolution = {
       decision: "approve",
       policy: "approver",

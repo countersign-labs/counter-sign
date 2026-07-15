@@ -81,14 +81,20 @@ describe("countersignature sign/verify round-trip", () => {
 describe("checked-in example payloads carry real signatures", () => {
   const load = (p: string) => JSON.parse(readFileSync(join(import.meta.dirname, "..", p), "utf8"));
 
-  it("intent.example.json verifies", () => {
+  it("intent.example.json and the keyed quorum intent verify", () => {
     expect(verifyIntent(load("examples/payloads/intent.example.json"))).toBe(true);
+    expect(verifyIntent(load("examples/payloads/intent.quorum.example.json"))).toBe(true);
   });
 
-  it("all countersignature examples verify", () => {
-    for (const name of ["approve", "reject", "default-timeout"]) {
+  it("all countersignature examples verify (incl. the keyed receipt, signed by the approver's own key)", () => {
+    for (const name of ["approve", "reject", "keyed", "default-timeout"]) {
       expect(verifyCountersignature(load(`examples/payloads/countersignature.${name}.example.json`))).toBe(true);
     }
+    // The keyed receipt's key is the approver's own — it matches an approver bound in the quorum Intent.
+    const keyed = load("examples/payloads/countersignature.keyed.example.json");
+    const quorum = load("examples/payloads/intent.quorum.example.json");
+    const bound = quorum.approvers.find((a: { actor: string }) => a.actor === keyed.actor);
+    expect(bound.public_key).toBe(keyed.public_key);
   });
 
   it("default-timeout example is an on-time Resolution for its Intent", () => {

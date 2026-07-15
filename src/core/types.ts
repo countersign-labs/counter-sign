@@ -2,21 +2,41 @@
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0; see LICENSE at repo root.
 
-export const COUNTERSIGN_VERSION = "0.1" as const;
+export const COUNTERSIGN_VERSION = "0.2" as const;
 
 /**
  * Signature domain-separation contexts. Each artifact type signs under a
  * distinct label so a signature is only ever valid for the artifact it was
  * minted for. Bump alongside COUNTERSIGN_VERSION on any wire-format change.
  */
-export const INTENT_CONTEXT = "countersign-intent-v0.1" as const;
-export const COUNTERSIGNATURE_CONTEXT = "countersign-countersignature-v0.1" as const;
-export const LINK_CONTEXT = "countersign-link-v0.1" as const;
+export const INTENT_CONTEXT = "countersign-intent-v0.2" as const;
+export const COUNTERSIGNATURE_CONTEXT = "countersign-countersignature-v0.2" as const;
+export const LINK_CONTEXT = "countersign-link-v0.2" as const;
 
 export type RiskTier = "low" | "medium" | "high" | "critical";
 export type Decision = "approve" | "reject";
 /** "approver" = an explicit human decision; "default" = the Intent's declared Default fired. */
 export type Policy = "approver" | "default";
+
+/**
+ * How an approver's decision is authenticated.
+ * - `vouched`: the integration server signs "actor X approved" with the authority
+ *   key (the frictionless button flow). Fine for low-stakes; a compromised server
+ *   could forge it.
+ * - `keyed`: approver X signs their own receipt with their own key (`public_key`),
+ *   which the server never holds — so the server cannot forge it and the receipt
+ *   is independently verifiable. Required for `quorum > 1` (real separation of duty).
+ */
+export type ApproverMode = "vouched" | "keyed";
+
+/** A single approver slot on an Intent. */
+export interface Approver {
+  /** channel:address, e.g. "telegram:8675309", "email:ops@example.com" */
+  actor: string;
+  mode: ApproverMode;
+  /** base64url raw ed25519 (or, from Phase 2, COSE) public key. REQUIRED iff mode === "keyed". */
+  public_key?: string;
+}
 
 /** A signed statement of what an agent wants to do. */
 export interface Intent {
@@ -30,7 +50,8 @@ export interface Intent {
   action: string;
   summary: string;
   risk_tier: RiskTier;
-  approvers: string[];
+  /** who may countersign, each bound to a mode (and a key, if keyed). */
+  approvers: Approver[];
   /** number of distinct approvers whose approve is required (M-of-N); >= 1 */
   quorum: number;
   /** seconds until the Default fires, counted from created_at */
@@ -64,7 +85,8 @@ export interface IntentFields {
   action: string;
   summary: string;
   risk_tier: RiskTier;
-  approvers: string[];
+  /** A bare string is shorthand for a `vouched` approver; an object sets mode/key. */
+  approvers: (string | Approver)[];
   /** distinct approvals required (M-of-N); optional, defaults to 1. */
   quorum?: number;
   timeout: number;

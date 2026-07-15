@@ -1,21 +1,27 @@
 {
-  "countersign": "0.1",
-  "intent_id": "16f911ac-da2d-4444-be55-3eb168010b81",
+  "countersign": "0.2",
+  "intent_id": "80066a51-e432-4ad9-b4f6-89c51987c200",
   "agent": {
     "id": "agent:example",
-    "public_key": "EbiNxVFvCq9wL5rTS0K5uHUgcCzHMetDInB__yeBVbI"
+    "public_key": "xqCpP0ZFbnNnuBpnz31rGXCteqAc3d8xYFmIAexdT-U"
   },
   "action": "billing.refund",
   "summary": "Refund $42.00 to customer #1337 for order A-2041",
   "risk_tier": "high",
   "approvers": [
-    "telegram:8675309",
-    "email:ops@example.com"
+    {
+      "actor": "telegram:8675309",
+      "mode": "vouched"
+    },
+    {
+      "actor": "email:ops@example.com",
+      "mode": "vouched"
+    }
   ],
   "quorum": 1,
   "timeout": 300,
   "default": "reject",
   "callback": "https://agent.example.com/countersign/callback",
-  "created_at": "2026-07-15T17:32:42.612Z",
-  "signature": "mhnKpxJuTbwcq4zS_IUUZ4o6pAqygYz2KYMjkDeTGqC__VnwcEDEj9Q7R32sMd6zXwug1vfVSqavryJ3W98CBQ"
+  "created_at": "2026-07-15T22:23:18.894Z",
+  "signature": "Q9teAzsteI37cyqy2UvPEkBsGEuBgth5qs1H-vE-v4176B1-uXoxqZ6g0cRfMrVXap411Fzc0qqTPZTybEg5BA"
 }

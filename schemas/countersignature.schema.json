@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://countersign.dev/schemas/countersignature.schema.json",
   "title": "Countersignature",
-  "description": "A signed, portable receipt of a decision over an Intent. counter-sign spec v0.1.",
+  "description": "A signed, portable receipt of a decision over an Intent. counter-sign spec v0.2.",
   "type": "object",
   "required": [
     "countersign",
@@ -18,7 +18,7 @@
   "properties": {
     "countersign": {
       "description": "Protocol version.",
-      "const": "0.1"
+      "const": "0.2"
     },
     "intent_id": {
       "description": "The Intent this receipt decides.",

@@ -33,6 +33,25 @@ export function fromB64url(s: string): Buffer {
   return Buffer.from(s, "base64url");
 }
 
+/**
+ * True iff `s` is the CANONICAL base64url encoding of a raw 32-byte ed25519
+ * public key. base64url is not injective — the trailing char carries unused bits,
+ * so one 32-byte key has several valid-looking encodings. Requiring canonicality
+ * (re-encoding the decoded bytes yields the identical string) means a key has
+ * exactly ONE string form, so exact-string comparison is sound: two encodings of
+ * the same key can never masquerade as two distinct approvers.
+ */
+export function isCanonicalPublicKey(s: unknown): s is string {
+  if (typeof s !== "string") return false;
+  let bytes: Buffer;
+  try {
+    bytes = fromB64url(s);
+  } catch {
+    return false;
+  }
+  return bytes.length === 32 && toB64url(bytes) === s;
+}
+
 export function hexToBytes(hex: string): Buffer {
   return Buffer.from(hex, "hex");
 }

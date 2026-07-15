@@ -149,6 +149,13 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
       if (approver.mode === "keyed") {
         if (!approver.public_key)
           throw new InvalidCountersignatureError(`keyed approver ${cs.actor} for ${intent.intent_id} has no bound key`);
+        // A keyed slot must belong to the approver, not the authority — binding the
+        // authority key here would let the authority-key holder forge that slot,
+        // silently degrading separation of duty. Refuse it.
+        if (approver.public_key === expectedAuthorityPublicKey)
+          throw new InvalidCountersignatureError(
+            `keyed approver ${cs.actor} for ${intent.intent_id} is bound to the authority key — a keyed slot must be the approver's own key`,
+          );
         trustedKey = approver.public_key;
       } else {
         trustedKey = expectedAuthorityPublicKey;

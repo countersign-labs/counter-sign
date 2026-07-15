@@ -1,10 +1,10 @@
 {
   "countersign": "0.2",
-  "intent_id": "80066a51-e432-4ad9-b4f6-89c51987c200",
+  "intent_id": "74ce174a-10d9-4336-9e25-3c563de88450",
   "decision": "approve",
   "actor": "telegram:8675309",
   "policy": "approver",
-  "timestamp": "2026-07-15T22:23:18.896Z",
-  "public_key": "rHAIyAJb-xjsv-r27Y-BMgsrIDI2dq8AXNKANh9_DvA",
-  "signature": "BkfA4N_W7ogyDl652z-PIdHugKAACgpFxu9X_D3aw6WXpl884OYWOMR9th9PFCKMD_J5_ITJLsEZPlDA-hdRBg"
+  "timestamp": "2026-07-15T22:38:48.675Z",
+  "public_key": "7uJbW9_hwUbqtfW_LaHIOB4BRokGZp62kwTu1HPh0C8",
+  "signature": "XwaGCP6iO0h_tDrDbA98Hpe8zC8s1bfwpye_yllbQ3s8GXSQ6Gq6Fl0dTh7CdOcaX_2ssVq4XNDV3UtCCFr-CA"
 }

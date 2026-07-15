@@ -1,9 +1,9 @@
 {
   "countersign": "0.2",
-  "intent_id": "80066a51-e432-4ad9-b4f6-89c51987c200",
+  "intent_id": "74ce174a-10d9-4336-9e25-3c563de88450",
   "agent": {
     "id": "agent:example",
-    "public_key": "xqCpP0ZFbnNnuBpnz31rGXCteqAc3d8xYFmIAexdT-U"
+    "public_key": "vy40mPjvbYvb5TbuJ8i3dvt402AYjXQWGnw6V89SKBs"
   },
   "action": "billing.refund",
   "summary": "Refund $42.00 to customer #1337 for order A-2041",
@@ -22,6 +22,6 @@
   "timeout": 300,
   "default": "reject",
   "callback": "https://agent.example.com/countersign/callback",
-  "created_at": "2026-07-15T22:23:18.894Z",
-  "signature": "Q9teAzsteI37cyqy2UvPEkBsGEuBgth5qs1H-vE-v4176B1-uXoxqZ6g0cRfMrVXap411Fzc0qqTPZTybEg5BA"
+  "created_at": "2026-07-15T22:38:48.674Z",
+  "signature": "n-pZnEANtjWOvp660ywVIoszE-7EvEhtejUDt9OQHwaq9_wKM5TUnoPRddIElBG66sx3BcmZsGqpRPfoj1UYDg"
 }

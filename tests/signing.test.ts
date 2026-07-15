@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { canonicalize } from "../src/core/canonical.js";
 import { signDecision, verifyCountersignature } from "../src/core/countersignature.js";
+import { verifyResolution } from "../src/core/defaults.js";
 import { createIntent, verifyIntent } from "../src/core/intent.js";
 import { generateKeypair, publicKeyFromSecret } from "../src/core/keys.js";
 import type { IntentFields } from "../src/core/types.js";
@@ -88,5 +89,17 @@ describe("checked-in example payloads carry real signatures", () => {
     for (const name of ["approve", "reject", "default-timeout"]) {
       expect(verifyCountersignature(load(`examples/payloads/countersignature.${name}.example.json`))).toBe(true);
     }
+  });
+
+  it("default-timeout example is an on-time Resolution for its Intent", () => {
+    const intent = load("examples/payloads/intent.example.json");
+    const receipt = load("examples/payloads/countersignature.default-timeout.example.json");
+    expect(() =>
+      verifyResolution(
+        intent,
+        { decision: receipt.decision, policy: "default", countersignatures: [receipt] },
+        receipt.public_key,
+      ),
+    ).not.toThrow();
   });
 });

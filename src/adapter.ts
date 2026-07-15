@@ -5,7 +5,7 @@
 import type { IncomingMessage } from "node:http";
 import { CountersignError } from "./core/errors.js";
 import { normalizeActor, signDecision } from "./core/countersignature.js";
-import { deadline } from "./core/defaults.js";
+import { deadline, DEFAULT_TIMEOUT_ACTOR } from "./core/defaults.js";
 import { quorumOf } from "./core/intent.js";
 import { generateKeypair } from "./core/keys.js";
 import type { Countersignature, Decision, Intent, Resolution } from "./core/types.js";
@@ -66,7 +66,10 @@ export class PendingDecisions {
       const entry: PendingEntry = {
         intent,
         quorum: quorumOf(intent),
-        approverSet: new Set(intent.approvers.map(normalizeActor)),
+        // `default:timeout` is the runtime's reserved Default actor and can never be a
+        // human approver, even if a hostile Intent lists it — mirrors verifyResolution's
+        // choke-point check so settle-level gating stays in parity (defense in depth).
+        approverSet: new Set(intent.approvers.map(normalizeActor).filter((a) => a !== DEFAULT_TIMEOUT_ACTOR)),
         approvals: new Map(),
         resolve,
         reject,

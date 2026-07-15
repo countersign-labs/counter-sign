@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { signDecision } from "../src/core/countersignature.js";
-import { defaultResolution } from "../src/core/defaults.js";
+import { deadline, defaultResolution } from "../src/core/defaults.js";
 import { createIntent } from "../src/core/intent.js";
 import { generateKeypair } from "../src/core/keys.js";
 
@@ -45,7 +45,18 @@ const quorumIntent = createIntent(
 
 const approved = signDecision(intent, "approve", "telegram:8675309", authority);
 const rejected = signDecision(intent, "reject", "email:ops@example.com", authority);
-const timedOut = defaultResolution(intent, authority).countersignatures[0];
+// The vector represents a timeout that has already fired. Advance the guard's
+// wall clock to the exact deadline so defaultResolution mints a conforming,
+// on-time receipt without making payload generation wait five minutes.
+const timedOut = (() => {
+  const actualNow = Date.now;
+  try {
+    Date.now = () => deadline(intent);
+    return defaultResolution(intent, authority).countersignatures[0];
+  } finally {
+    Date.now = actualNow;
+  }
+})();
 
 const write = (name: string, value: unknown) => {
   writeFileSync(join(dir, name), JSON.stringify(value, null, 2) + "\n");

@@ -1,9 +1,9 @@
 {
   "countersign": "0.1",
-  "intent_id": "e37557cd-66e0-47c1-8dd8-d8e8f3223aff",
+  "intent_id": "c006879c-4094-4361-b1a6-d2edcb2dc3b1",
   "agent": {
     "id": "agent:example",
-    "public_key": "HyjiGHMCLcv1LHj1HhouHMC4V6VR-ZZwxljxh0yYXEU"
+    "public_key": "EbiNxVFvCq9wL5rTS0K5uHUgcCzHMetDInB__yeBVbI"
   },
   "action": "prod.deploy",
   "summary": "Deploy release 2.4.0 to production (two-person rule)",
@@ -17,6 +17,6 @@
   "timeout": 600,
   "default": "reject",
   "callback": null,
-  "created_at": "2026-07-07T15:07:55.677Z",
-  "signature": "GYdTJfN4yGQd2k7bdHDbUTg2eBqbJZPmRTTDMv3kJhTzRDKj3VfLiQqfy7MvG1s6rk9tkVgdinmDNHwUeDImBQ"
+  "created_at": "2026-07-15T17:32:42.613Z",
+  "signature": "9vrEo9877MK_9Pq03FQMPhDc93_3_aaTSCfIRQupAA1-HV7ajUhG4Eosp0n8VpGTapepelkSPW_3Fsa_iURFCw"
 }

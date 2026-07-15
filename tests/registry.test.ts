@@ -179,4 +179,17 @@ describe("the enroll CLI", () => {
     expect(reg.verifyChain(orgPub)).toBe(true);
     expect(reg.isActive("m:alice", alice.publicKey)).toBe(false);
   });
+
+  it("refuses to append with a WRONG org-key (would produce a mixed-root registry) and exits nonzero", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "cs-reg-")), "reg.jsonl");
+    execFileSync("npx", ["tsx", "scripts/enroll.ts", "--registry", path, "--actor", "m:alice", "--approver-key", alice.secretKey, "--org-key", org.secretKey], { encoding: "utf8" });
+    const wrongOrg = generateKeypair();
+    expect(() =>
+      execFileSync("npx", ["tsx", "scripts/enroll.ts", "--registry", path, "--actor", "m:bob", "--approver-key", bob.secretKey, "--org-key", wrongOrg.secretKey], { encoding: "utf8", stdio: "pipe" }),
+    ).toThrow();
+    // The file is unchanged (still one record, chain valid under the original org).
+    const reg = ApproverRegistry.fromJSONL(readFileSync(path, "utf8"));
+    expect(reg.all.length).toBe(1);
+    expect(reg.verifyChain(orgPub)).toBe(true);
+  });
 });

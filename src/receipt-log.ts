@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { canonicalize } from "./core/canonical.js";
-import { verifyCountersignature, type VerifyOptions } from "./core/countersignature.js";
+import { normalizeActor, verifyCountersignature, type VerifyOptions } from "./core/countersignature.js";
 import { CountersignError } from "./core/errors.js";
 import { toB64url } from "./core/keys.js";
 import type { Countersignature, Intent, Resolution } from "./core/types.js";
@@ -263,7 +263,7 @@ export class ReceiptLog implements ReceiptSink {
    * intact.
    */
   async verifyAll(opts: VerifyAllOptions = {}): Promise<ReceiptLogReport> {
-    const knownIds = opts.intents ? new Set(opts.intents.map((i) => i.intent_id)) : undefined;
+    const intentsById = opts.intents ? new Map(opts.intents.map((i) => [i.intent_id, i])) : undefined;
     const lines = await this.parseLines();
     const chain = walkChain(lines, opts.expectedHead);
     const faults: ReceiptFault[] = [];
@@ -278,12 +278,29 @@ export class ReceiptLog implements ReceiptSink {
         return;
       }
       let reason: ReceiptFault["reason"] | undefined;
-      // Thread the WebAuthn RP policy so passkey receipts in the log verify too;
-      // without it, verifyCountersignature fails closed on every passkey receipt.
+      // (1) Integrity: the receipt verifies under its own embedded key (or, for a
+      // passkey receipt, the WebAuthn assertion — needs the RP policy or it fails closed).
       if (!verifyCountersignature(cs, { webauthn: opts.webauthn })) reason = "invalid-signature";
-      else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn }))
-        reason = "untrusted-key";
-      else if (knownIds && !knownIds.has(cs.intent_id)) reason = "unknown-intent";
+      else {
+        const intent = intentsById?.get(cs.intent_id);
+        if (intentsById && !intent) {
+          reason = "unknown-intent";
+        } else if (intent) {
+          // (2) Bind the receipt to the Intent's approver — a KEYED receipt must be
+          // signed by THAT actor's own bound key, not merely a globally-trusted key
+          // (else one trusted approver could forge another's receipt). A vouched or
+          // Default receipt must be authority-signed.
+          const approver = intent.approvers.find((a) => normalizeActor(a.actor) === normalizeActor(cs.actor));
+          if (approver?.mode === "keyed") {
+            if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";
+          } else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) {
+            reason = "untrusted-key";
+          }
+        } else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) {
+          // No Intents supplied → fall back to the global trusted-set check.
+          reason = "untrusted-key";
+        }
+      }
       if (reason) faults.push({ index, intent_id: cs.intent_id, actor: cs.actor, reason });
     });
     return { total: lines.length, valid: lines.length - faults.length, faults, chain, ok: faults.length === 0 && chain.intact };

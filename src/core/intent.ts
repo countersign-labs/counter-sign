@@ -41,24 +41,33 @@ function normalizeApprover(input: string | Approver): Approver {
  */
 function validateApprovers(approvers: Approver[], quorum: number): void {
   const keys = new Set<string>();
+  const actors = new Set<string>();
   for (const a of approvers) {
     if (!a || typeof a !== "object" || typeof a.actor !== "string" || a.actor.length === 0)
       throw new CountersignError("each approver must have a non-empty string actor");
     if (!APPROVER_MODES.has(a.mode)) throw new CountersignError(`approver ${a.actor} has invalid mode ${JSON.stringify(a.mode)}`);
-    if (normalizeActor(a.actor) === DEFAULT_TIMEOUT_ACTOR)
-      throw new CountersignError(`approver actor ${JSON.stringify(a.actor)} is reserved`);
+    const na = normalizeActor(a.actor);
+    if (na === DEFAULT_TIMEOUT_ACTOR) throw new CountersignError(`approver actor ${JSON.stringify(a.actor)} is reserved`);
+    // Distinct NORMALIZED actors — verifyResolution/settle/record all key on the
+    // normalized actor, so two approvers that normalize equal would disagree
+    // (last-wins) and mis-count the quorum.
+    if (actors.has(na)) throw new CountersignError(`approver actor ${JSON.stringify(a.actor)} is listed more than once`);
+    actors.add(na);
     if (a.mode === "keyed") {
       if (typeof a.public_key !== "string" || a.public_key.length === 0)
         throw new CountersignError(`keyed approver ${a.actor} must carry a public_key`);
       // A keyed approver's key is EITHER a raw ed25519 key (canonical 32-byte,
       // Phase 1 CLI/bot) OR a passkey credential descriptor (webauthn-…, Phase 2).
-      // Both must be canonical so the exact-string distinctness check below is
-      // sound — two encodings of ONE key must not fill two quorum slots.
+      // Both must be canonical.
       if (!isCanonicalPublicKey(a.public_key) && !isValidCredentialDescriptor(a.public_key))
         throw new CountersignError(`keyed approver ${a.actor} has a non-canonical or malformed public_key`);
-      if (keys.has(a.public_key))
-        throw new CountersignError(`approver public_key ${a.public_key} is used by more than one approver`);
-      keys.add(a.public_key);
+      // Dedup by the underlying key MATERIAL, not the string: a raw ed25519 key K
+      // and the passkey descriptor `webauthn-ed25519:K` are the SAME key, so they
+      // must not fill two quorum slots (one holder could satisfy both).
+      const material = a.public_key.startsWith("webauthn-ed25519:") ? a.public_key.slice("webauthn-ed25519:".length) : a.public_key;
+      if (keys.has(material))
+        throw new CountersignError(`approver public_key ${a.public_key} shares key material with another approver`);
+      keys.add(material);
     } else if (a.public_key !== undefined) {
       throw new CountersignError(`vouched approver ${a.actor} must not carry a public_key`);
     }

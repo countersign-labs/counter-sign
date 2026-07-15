@@ -115,6 +115,16 @@ describe("history()", () => {
 });
 
 describe("verifyAll()", () => {
+  it("binds a keyed receipt to its Intent approver — a trusted approver cannot forge another's", async () => {
+    const i = intent(2); // keyed local:a / local:b, distinct keys
+    // local:a signs a receipt claiming to be local:b, using HER own key.
+    const forged = signDecision(i, "approve", "local:b", keyOf("local:a").secretKey, "approver");
+    await log.append(forged);
+    const report = await log.verifyAll({ intents: [i], trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] });
+    expect(report.ok).toBe(false);
+    expect(report.faults.some((f) => f.reason === "untrusted-key")).toBe(true);
+  });
+
   it("reports every receipt valid when untampered", async () => {
     await log.record(approval(intent(2), ["local:a", "local:b"]));
     const r = await log.verifyAll();

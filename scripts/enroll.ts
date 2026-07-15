@@ -41,6 +41,12 @@ if (!registryPath || !actor || !orgKey) die("usage: enroll --registry <file> --a
 
 const registry = existsSync(registryPath!) ? ApproverRegistry.fromJSONL(readFileSync(registryPath!, "utf8")) : new ApproverRegistry();
 
+// Never append to a registry that does not verify under the supplied org key —
+// otherwise a wrong --org-key silently produces a mixed-root, unverifiable file.
+const orgPub = publicKeyFromSecret(orgKey!);
+if (registry.all.length > 0 && !registry.verifyChain(orgPub))
+  die(`existing registry at ${registryPath} does not verify under the supplied --org-key (wrong org key, or the file was tampered) — refusing to write`, 2);
+
 let publicKey: string;
 let pop: string | undefined;
 if (approverKey) {

@@ -76,9 +76,11 @@ from a chat button or an email link.
 
 **Two-person / M-of-N approval.** Set `quorum: N` on an Intent to require N
 *distinct* approvers before the action runs; any single approver vetoes. This
-works on the chat channels and the local approver, where distinct people can
-each respond (`npm run demo:quorum` shows a no-network two-person flow). The
-single-recipient email flow supports `quorum: 1` only and refuses more.
+works on the **chat channels**, where distinct people can each respond. The
+single-recipient **email** adapter and the single-terminal **local** adapter
+support `quorum: 1` only and refuse more — neither can independently
+authenticate distinct humans, so they don't pretend to. (`npm run demo:quorum`
+illustrates the accumulation/veto mechanism with simulated approvers.)
 
 Distinctness is counted over the identities the **trusted authority** records,
 so `quorum` is a control that authority enforces — not cryptographic separation

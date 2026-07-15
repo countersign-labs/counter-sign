@@ -7,13 +7,19 @@ import { stdin, stdout } from "node:process";
 import { userInfo } from "node:os";
 import { authorityKeyFromEnv, formatIntent, type Adapter } from "../adapter.js";
 import { signDecision } from "../core/countersignature.js";
+import { CountersignError } from "../core/errors.js";
 import { quorumOf } from "../core/intent.js";
-import type { Countersignature, Intent, Resolution } from "../core/types.js";
+import type { Intent, Resolution } from "../core/types.js";
 
 /**
  * No-network adapter: the "channel" is the terminal you are sitting at.
- * Useful for demos, tests, and CI — requires no tokens of any kind. Under
- * quorum it prompts for each distinct approver in turn; any reject vetoes.
+ * Useful for demos, tests, and CI — requires no tokens of any kind.
+ *
+ * SINGLE-APPROVER ONLY. One terminal cannot independently authenticate distinct
+ * humans — a single operator could type any names — so this adapter refuses
+ * `quorum > 1` rather than pretend to enforce a distinct-human control (the same
+ * stance EmailAdapter takes for its single bearer link). Use a chat adapter,
+ * where distinct people each respond, for real M-of-N.
  */
 export class LocalAdapter implements Adapter {
   readonly channel = "local";
@@ -21,40 +27,25 @@ export class LocalAdapter implements Adapter {
   constructor(private readonly authorityKey: string = authorityKeyFromEnv()) {}
 
   async deliver(intent: Intent): Promise<void> {
+    if (quorumOf(intent) > 1) {
+      throw new CountersignError(
+        `local adapter supports a single approver (quorum 1); intent ${intent.intent_id} requires ${quorumOf(intent)}. ` +
+          `One terminal cannot authenticate distinct humans — use a chat adapter for M-of-N.`,
+      );
+    }
     stdout.write(`\n${formatIntent(intent)}\n\n`);
   }
 
   async awaitResolution(intent: Intent): Promise<Resolution> {
-    const quorum = quorumOf(intent);
     const rl = createInterface({ input: stdin });
-    // Read via the async line iterator, which buffers lines rather than
-    // dropping ones that arrive between sequential rl.question() calls (a
-    // readline race that breaks piped input for multi-prompt quorum flows).
-    const lines = rl[Symbol.asyncIterator]();
-    const ask = async (prompt: string): Promise<string> => {
-      stdout.write(prompt);
-      const next = await lines.next();
-      return next.done ? "" : String(next.value).trim();
-    };
-    const approvals = new Map<string, Countersignature>();
+    const who = userInfo().username;
+    const actor = `local:${who}`;
     try {
-      while (true) {
-        const who = quorum > 1 ? (await ask(`Approver name (${approvals.size}/${quorum} approved so far): `)) || userInfo().username : userInfo().username;
-        const answer = await ask(`${who}: approve "${intent.action}"? [y/N] `);
-        const actor = `local:${who}`;
-        if (!/^y(es)?$/i.test(answer)) {
-          // A single reject (or EOF with no more input) vetoes the whole request.
-          return {
-            decision: "reject",
-            policy: "approver",
-            countersignatures: [signDecision(intent, "reject", actor, this.authorityKey)],
-          };
-        }
-        approvals.set(actor, signDecision(intent, "approve", actor, this.authorityKey));
-        if (approvals.size >= quorum) {
-          return { decision: "approve", policy: "approver", countersignatures: [...approvals.values()] };
-        }
-      }
+      stdout.write(`${who}: approve "${intent.action}"? [y/N] `);
+      const next = await rl[Symbol.asyncIterator]().next();
+      const answer = next.done ? "" : String(next.value).trim();
+      const decision: "approve" | "reject" = /^y(es)?$/i.test(answer) ? "approve" : "reject";
+      return { decision, policy: "approver", countersignatures: [signDecision(intent, decision, actor, this.authorityKey)] };
     } finally {
       rl.close();
     }

@@ -278,8 +278,10 @@ export class ReceiptLog implements ReceiptSink {
         return;
       }
       let reason: ReceiptFault["reason"] | undefined;
-      if (!verifyCountersignature(cs)) reason = "invalid-signature";
-      else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys }))
+      // Thread the WebAuthn RP policy so passkey receipts in the log verify too;
+      // without it, verifyCountersignature fails closed on every passkey receipt.
+      if (!verifyCountersignature(cs, { webauthn: opts.webauthn })) reason = "invalid-signature";
+      else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn }))
         reason = "untrusted-key";
       else if (knownIds && !knownIds.has(cs.intent_id)) reason = "unknown-intent";
       if (reason) faults.push({ index, intent_id: cs.intent_id, actor: cs.actor, reason });

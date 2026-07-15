@@ -113,7 +113,7 @@ export function verifyWebAuthnAssertion(
     const signature = fromB64url(signatureB64url);
 
     // --- clientDataJSON ---
-    let clientData: { type?: unknown; challenge?: unknown; origin?: unknown };
+    let clientData: { type?: unknown; challenge?: unknown; origin?: unknown; crossOrigin?: unknown };
     try {
       clientData = JSON.parse(clientDataBytes.toString("utf8"));
     } catch {
@@ -122,6 +122,10 @@ export function verifyWebAuthnAssertion(
     if (clientData.type !== "webauthn.get") return false;
     if (typeof clientData.challenge !== "string" || !eqB64url(clientData.challenge, opts.expectedChallenge)) return false;
     if (typeof clientData.origin !== "string" || !opts.allowedOrigins.includes(clientData.origin)) return false;
+    // Reject an assertion produced inside a cross-origin frame (defense in depth
+    // alongside the signing page's frame-ancestors 'none'): `crossOrigin` is
+    // present and false for a top-level ceremony.
+    if (clientData.crossOrigin === true) return false;
 
     // --- authenticatorData: 32-byte rpIdHash | 1-byte flags | 4-byte signCount | … ---
     if (authData.length < 37) return false;

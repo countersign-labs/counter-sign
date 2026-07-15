@@ -262,3 +262,20 @@ A subsequent standard (non-adversarial) Codex review found one more:
   to ~1 ms and fires the Default immediately — an auto-approve for
   `default:"approve"`. `awaitWithDefault` now refuses a `remaining` beyond the
   timer ceiling (fail closed).
+
+An adversarial re-review of the five hardening commits above found one more:
+
+- **CS-21 · Reject resolutions bypassed the signed approver allowlist (High) —
+  FIXED.** `verifyResolution`'s allowlist/policy proof ran only for
+  `decision: "approve"`, so a custom or version-skewed adapter could return an
+  authority-signed `reject` receipt from an actor absent from the Intent's
+  `approvers` — or under an arbitrary `policy` — and `awaitWithDefault` would
+  accept it: an unauthorized channel participant could permanently veto an
+  operation and mint a misleading audit receipt (denial of service).
+  `PendingDecisions.settle` already blocked this, but `verifyResolution` is the
+  documented trust-boundary choke point for ANY adapter. The policy proof now
+  runs for both decisions: a `policy:"approver"` resolution requires every
+  receipt's actor to be in the signed allowlist (approve additionally needs the
+  quorum); a `policy:"default"` resolution must be exactly the canonical
+  `default:timeout` receipt whose decision matches what `defaultResolution`
+  would produce; any other policy is rejected.

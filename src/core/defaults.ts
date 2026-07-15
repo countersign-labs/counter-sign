@@ -40,9 +40,11 @@ export function defaultResolution(intent: Intent, authoritySecret: string): Reso
 /**
  * Independently validate a Resolution before it is acted on. Never trusts the
  * producer's word: every receipt must decide this exact `intent_id` and be
- * signed by the expected authority, and an `approve` resolution must be backed
- * by `quorum` DISTINCT approvers whose receipts all say `approve`. Throws
- * InvalidCountersignatureError on any failure.
+ * signed by the expected authority; an `approve` must be backed by `quorum`
+ * DISTINCT approvers whose receipts all say `approve`; a `reject` must come
+ * from a listed approver too (a veto is authority as much as an approval) or
+ * be the canonical timeout Default. Throws InvalidCountersignatureError on
+ * any failure.
  */
 export function verifyResolution(intent: Intent, resolution: Resolution, expectedAuthorityPublicKey: string): void {
   // The Intent we authorize against must itself be structurally sound and
@@ -75,49 +77,57 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
       );
   }
 
-  // An `approve` is justified in EXACTLY two ways, and the check NEVER branches
-  // on the attacker-supplied `resolution.policy` to decide whether to run — it
-  // branches only to decide WHICH of the two proofs is required, and rejects any
-  // other policy. (Formerly, policy:"default" skipped quorum entirely.)
-  if (resolution.decision === "approve") {
-    if (resolution.policy === "approver") {
-      // A human quorum: `quorum` DISTINCT approvers, each of whom MUST be named in
-      // the Intent's signed `approvers` allowlist. Without this, any actor the
-      // trusted authority vouches for (e.g. any member of the delivery channel)
-      // could satisfy quorum — the signed `approvers` field would be decorative.
-      const allow = new Set(intent.approvers.map(normalizeActor));
-      const distinct = new Set<string>();
-      for (const cs of receipts) {
-        const actor = normalizeActor(cs.actor);
-        if (!allow.has(actor))
-          throw new InvalidCountersignatureError(
-            `approve resolution for ${intent.intent_id} has a receipt from ${cs.actor}, who is not in the Intent's approvers`,
-          );
-        distinct.add(actor);
-      }
+  // A resolution — approve OR reject — is justified in EXACTLY two ways, and
+  // the check NEVER branches on the attacker-supplied `resolution.policy` to
+  // decide whether to run — it branches only to decide WHICH of the two proofs
+  // is required, and rejects any other policy. (Formerly only `approve` was
+  // policy-checked, so an authority-signed reject from an actor outside the
+  // allowlist — or under an unknown policy — could veto any operation.)
+  if (resolution.policy === "approver") {
+    // Human decisions: EVERY receipt's actor MUST be named in the Intent's
+    // signed `approvers` allowlist. Without this, any actor the trusted
+    // authority vouches for (e.g. any member of the delivery channel) could
+    // decide — the signed `approvers` field would be decorative. A veto is as
+    // much an exercise of authority as an approval.
+    const allow = new Set(intent.approvers.map(normalizeActor));
+    const distinct = new Set<string>();
+    for (const cs of receipts) {
+      const actor = normalizeActor(cs.actor);
+      if (!allow.has(actor))
+        throw new InvalidCountersignatureError(
+          `${resolution.decision} resolution for ${intent.intent_id} has a receipt from ${cs.actor}, who is not in the Intent's approvers`,
+        );
+      distinct.add(actor);
+    }
+    // An approve additionally needs a full quorum of DISTINCT approvers; a
+    // single listed approver's reject is a complete veto.
+    if (resolution.decision === "approve") {
       const need = quorumOf(intent);
       if (distinct.size < need)
         throw new InvalidCountersignatureError(
           `approve resolution for ${intent.intent_id} has ${distinct.size} distinct approver(s), needs ${need}`,
         );
-    } else if (resolution.policy === "default") {
-      // The declared timeout Default — legitimate ONLY for a single-approver
-      // Intent that declares default:"approve", evidenced by exactly one
-      // default:timeout receipt. Anything else is an attempt to smuggle an
-      // approval past the quorum requirement.
-      if (quorumOf(intent) !== 1 || intent.default !== "approve")
-        throw new InvalidCountersignatureError(
-          `a default:approve resolution for ${intent.intent_id} is only valid for a quorum-1 Intent that declares default:"approve"`,
-        );
-      if (receipts.length !== 1 || receipts[0].policy !== "default" || normalizeActor(receipts[0].actor) !== "default:timeout")
-        throw new InvalidCountersignatureError(
-          `a default:approve resolution for ${intent.intent_id} must be exactly one default:timeout receipt`,
-        );
-    } else {
-      throw new InvalidCountersignatureError(
-        `approve resolution for ${intent.intent_id} has an unrecognized policy ${JSON.stringify(resolution.policy)}`,
-      );
     }
+  } else if (resolution.policy === "default") {
+    // The declared timeout Default — evidenced by exactly one default:timeout
+    // receipt whose decision matches what defaultResolution would produce:
+    // reject for a multi-person quorum (fail closed), the Intent's declared
+    // `default` otherwise. Anything else smuggles a decision past the declared
+    // Default — an approve past the quorum requirement, or a reject (a forged
+    // veto) past a default:"approve" window.
+    const expected = quorumOf(intent) > 1 ? "reject" : intent.default;
+    if (resolution.decision !== expected)
+      throw new InvalidCountersignatureError(
+        `a default:${resolution.decision} resolution for ${intent.intent_id} contradicts the Intent's Default (${expected})`,
+      );
+    if (receipts.length !== 1 || receipts[0].policy !== "default" || normalizeActor(receipts[0].actor) !== "default:timeout")
+      throw new InvalidCountersignatureError(
+        `a default resolution for ${intent.intent_id} must be exactly one default:timeout receipt`,
+      );
+  } else {
+    throw new InvalidCountersignatureError(
+      `resolution for ${intent.intent_id} has an unrecognized policy ${JSON.stringify(resolution.policy)}`,
+    );
   }
 }
 
@@ -131,9 +141,10 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
  * every receipt MUST decide this exact `intent_id`, be signed by the key derived
  * from `authoritySecret`, and carry the resolution's own decision; an `approve`
  * MUST be backed by `quorum` distinct approvers (or be the narrow quorum-1
- * timeout Default). This choke point stops an under-quorum, wrong-key,
- * decision-mismatched, or policy-mislabelled "approve" from being accepted —
- * integrity alone is not authority.
+ * timeout Default), and a `reject` MUST come from a listed approver or be the
+ * canonical timeout Default. This choke point stops an under-quorum, wrong-key,
+ * decision-mismatched, policy-mislabelled, or unlisted-actor decision from
+ * being accepted — integrity alone is not authority.
  *
  * It does NOT provide separation of duty against the authority key itself:
  * distinctness is over `actor` strings the authority vouches for, so a holder of

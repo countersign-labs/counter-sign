@@ -277,6 +277,88 @@ describe("timeout still yields a signed Default with the reaper active (Codex #2
   });
 });
 
+describe("reject resolutions are bound to the approver allowlist too (Codex CS-21)", () => {
+  it("verifyResolution rejects a veto receipt from an actor not in the Intent's approvers", () => {
+    const i = intent(1); // approvers: m:alice / m:bob / m:carol
+    const forged: Resolution = {
+      decision: "reject",
+      policy: "approver",
+      countersignatures: [signDecision(i, "reject", "m:mallory", authority.secretKey)],
+    };
+    expect(() => verifyResolution(i, forged, authPub)).toThrow(/not in the Intent's approvers/);
+  });
+
+  it("verifyResolution rejects a reject resolution with an unrecognized policy", () => {
+    const i = intent(1);
+    const forged = {
+      decision: "reject",
+      policy: "x" as unknown as "approver",
+      countersignatures: [signDecision(i, "reject", "m:alice", authority.secretKey)],
+    } as Resolution;
+    expect(() => verifyResolution(i, forged, authPub)).toThrow(InvalidCountersignatureError);
+  });
+
+  it("verifyResolution rejects a policy:'default' reject that is not the canonical timeout receipt", () => {
+    const i = intent(1); // default: reject — but the receipt's actor is not default:timeout
+    const forged: Resolution = {
+      decision: "reject",
+      policy: "default",
+      countersignatures: [signDecision(i, "reject", "m:mallory", authority.secretKey, "default")],
+    };
+    expect(() => verifyResolution(i, forged, authPub)).toThrow(InvalidCountersignatureError);
+  });
+
+  it("verifyResolution rejects a 'default' reject that contradicts the Intent's declared Default", () => {
+    // quorum-1 with default:"approve": the timeout could only ever have approved, so a
+    // default-labelled reject receipt is forged even if it is authority-signed.
+    const i = intent(1, { default: "approve" });
+    const forged: Resolution = {
+      decision: "reject",
+      policy: "default",
+      countersignatures: [signDecision(i, "reject", "default:timeout", authority.secretKey, "default")],
+    };
+    expect(() => verifyResolution(i, forged, authPub)).toThrow(InvalidCountersignatureError);
+  });
+
+  it("awaitWithDefault refuses an authority-signed veto from an unlisted actor (fail closed)", async () => {
+    const i = intent(1);
+    const forged: Resolution = {
+      decision: "reject",
+      policy: "approver",
+      countersignatures: [signDecision(i, "reject", "m:mallory", authority.secretKey)],
+    };
+    await expect(awaitWithDefault(i, Promise.resolve(forged), authority.secretKey)).rejects.toThrow(
+      InvalidCountersignatureError,
+    );
+  });
+
+  it("still ACCEPTS a listed approver's veto and the canonical timeout rejects", () => {
+    const i = intent(1); // default: reject
+    const veto: Resolution = {
+      decision: "reject",
+      policy: "approver",
+      countersignatures: [signDecision(i, "reject", "m:bob", authority.secretKey)],
+    };
+    expect(() => verifyResolution(i, veto, authPub)).not.toThrow();
+
+    const timeoutReject: Resolution = {
+      decision: "reject",
+      policy: "default",
+      countersignatures: [signDecision(i, "reject", "default:timeout", authority.secretKey, "default")],
+    };
+    expect(() => verifyResolution(i, timeoutReject, authPub)).not.toThrow();
+
+    // A multi-person quorum's timeout Default is always reject (fail closed).
+    const q = intent(3);
+    const failClosed: Resolution = {
+      decision: "reject",
+      policy: "default",
+      countersignatures: [signDecision(q, "reject", "default:timeout", authority.secretKey, "default")],
+    };
+    expect(() => verifyResolution(q, failClosed, authPub)).not.toThrow();
+  });
+});
+
 describe("Telegram webhook survives an oversized body (Codex #3)", () => {
   it("catches readBody's cap throw (500, no unhandled rejection) instead of leaking it", async () => {
     const rejections: unknown[] = [];

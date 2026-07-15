@@ -16,6 +16,12 @@ export {
 } from "./adapter.js";
 export { wrapAction, type WrapOptions } from "./shim.js";
 export {
+  SigningServer,
+  createSigningToken,
+  verifySigningToken,
+  type SigningServerConfig,
+} from "./signing.js";
+export {
   ReceiptLog,
   type ReceiptSink,
   type ReceiptLogReport,

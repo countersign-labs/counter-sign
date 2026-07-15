@@ -252,3 +252,13 @@ A re-review after those fixes found one more:
   humans, so LocalAdapter now refuses `quorum > 1` at `deliver` (matching
   EmailAdapter's single-bearer-link stance). `demo:quorum` was reworked to
   illustrate the accumulation/veto mechanism with clearly-simulated approvers.
+
+A subsequent standard (non-adversarial) Codex review found one more:
+
+- **CS-20 · A far-future `created_at` collapsed the review window (P1) — FIXED.**
+  `assertIntentInvariants` bounded `timeout` but only required `created_at` to be
+  *finite*, so a parseable but absurd timestamp (e.g. `+275760-09-13T…`) made
+  `deadline − now` exceed Node's ~24.8-day `setTimeout` ceiling; Node clamps that
+  to ~1 ms and fires the Default immediately — an auto-approve for
+  `default:"approve"`. `awaitWithDefault` now refuses a `remaining` beyond the
+  timer ceiling (fail closed).

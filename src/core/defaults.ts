@@ -3,10 +3,13 @@
 // Licensed under the Apache License, Version 2.0; see LICENSE at repo root.
 
 import { normalizeActor, signDecision, verifyCountersignature } from "./countersignature.js";
-import { InvalidCountersignatureError } from "./errors.js";
+import { CountersignError, InvalidCountersignatureError } from "./errors.js";
 import { assertIntentInvariants, quorumOf, verifyIntent } from "./intent.js";
 import { publicKeyFromSecret } from "./keys.js";
 import type { Intent, Resolution } from "./types.js";
+
+/** Node's setTimeout ceiling (2^31-1 ms ≈ 24.8 days); larger delays clamp to ~1 ms. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 /** Epoch milliseconds at which the Intent's Default fires. */
 export function deadline(intent: Intent): number {
@@ -160,6 +163,12 @@ export async function awaitWithDefault(
   );
 
   const remaining = deadline(intent) - Date.now();
+  // A far-future (but parseable) created_at makes `remaining` exceed Node's timer
+  // ceiling; setTimeout would clamp it to ~1 ms and fire the Default immediately,
+  // collapsing the review window (an auto-approve for default:"approve"). No
+  // legitimate window is that long — timeout is bounded to ~24.8 days — so refuse.
+  if (remaining > MAX_TIMER_MS)
+    throw new CountersignError(`intent ${intent.intent_id} has an implausibly far-future deadline`);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const winner =

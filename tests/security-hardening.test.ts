@@ -13,6 +13,7 @@ import { InvalidCountersignatureError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
 import { generateKeypair, publicKeyFromSecret } from "../src/core/keys.js";
 import type { Intent, Resolution } from "../src/core/types.js";
+import { LocalAdapter } from "../src/adapters/local.js";
 import { TelegramAdapter } from "../src/adapters/telegram.js";
 import { WhatsAppAdapter } from "../src/adapters/whatsapp.js";
 
@@ -190,6 +191,13 @@ describe("Telegram keys the approver on the stable numeric id, not the mutable u
 });
 
 // ---- Findings from the Codex adversarial review of the v0.1.3 fixes ----
+
+describe("LocalAdapter refuses quorum it cannot authenticate (Codex re-review)", () => {
+  it("rejects quorum > 1 at deliver (one terminal cannot represent distinct humans)", async () => {
+    const a = new LocalAdapter(authority.secretKey);
+    await expect(a.deliver(intent(2))).rejects.toThrow(/single approver|quorum 1/);
+  });
+});
 
 describe("only named approvers can decide (Codex #1)", () => {
   it("ignores an unlisted actor's approve AND veto at settle", () => {

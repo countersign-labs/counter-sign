@@ -245,3 +245,10 @@ A re-review after those fixes found one more:
   `awaitWithDefault` itself: the adapter resolution is wrapped so any decision
   observed at/after the deadline is replaced by the Default, enforcing the rule for
   every Adapter implementation (settle keeps its gate as defense-in-depth).
+- **CS-19 · LocalAdapter overclaimed a distinct-human quorum (High) — FIXED.** For
+  `quorum > 1` the local adapter read approver names from stdin, so one terminal
+  operator could type `alice` then `bob` and mint a "two-person" quorum that
+  `verifyResolution` accepted. A single terminal cannot authenticate distinct
+  humans, so LocalAdapter now refuses `quorum > 1` at `deliver` (matching
+  EmailAdapter's single-bearer-link stance). `demo:quorum` was reworked to
+  illustrate the accumulation/veto mechanism with clearly-simulated approvers.

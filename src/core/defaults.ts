@@ -6,6 +6,7 @@ import { normalizeActor, signDecision, verifyCountersignature } from "./counters
 import { CountersignError, InvalidCountersignatureError } from "./errors.js";
 import { assertIntentInvariants, quorumOf, verifyIntent } from "./intent.js";
 import { publicKeyFromSecret } from "./keys.js";
+import type { WebAuthnPolicy } from "./webauthn.js";
 import type { Approver, Intent, Resolution } from "./types.js";
 
 /** Node's setTimeout ceiling (2^31-1 ms ≈ 24.8 days); larger delays clamp to ~1 ms. */
@@ -76,7 +77,12 @@ export function defaultResolution(intent: Intent, authoritySecret: string): Reso
  * be the canonical timeout Default. Throws InvalidCountersignatureError on
  * any failure.
  */
-export function verifyResolution(intent: Intent, resolution: Resolution, expectedAuthorityPublicKey: string): void {
+export function verifyResolution(
+  intent: Intent,
+  resolution: Resolution,
+  expectedAuthorityPublicKey: string,
+  webauthn?: WebAuthnPolicy,
+): void {
   // The Intent we authorize against must itself be structurally sound and
   // agent-signed — never act on a resolution for a malformed or forged Intent.
   assertIntentInvariants(intent);
@@ -160,7 +166,7 @@ export function verifyResolution(intent: Intent, resolution: Resolution, expecte
       } else {
         trustedKey = expectedAuthorityPublicKey;
       }
-      if (!verifyCountersignature(cs, { trustedKeys: trustedKey }))
+      if (!verifyCountersignature(cs, { trustedKeys: trustedKey, webauthn }))
         throw new InvalidCountersignatureError(
           `a ${approver.mode} receipt from ${cs.actor} for ${intent.intent_id} was not signed by the expected key (got ${cs.public_key})`,
         );
@@ -237,6 +243,7 @@ export async function awaitWithDefault(
   intent: Intent,
   resolution: Promise<Resolution>,
   authoritySecret: string,
+  webauthn?: WebAuthnPolicy,
 ): Promise<Resolution> {
   // Validate BEFORE computing a deadline: a NaN/huge created_at or timeout on a
   // wire Intent would otherwise collapse the review window (setTimeout(NaN) fires
@@ -324,6 +331,6 @@ export async function awaitWithDefault(
           }),
         ]).finally(() => clearTimeout(timer));
 
-  verifyResolution(intent, winner, expectedAuthorityPublicKey);
+  verifyResolution(intent, winner, expectedAuthorityPublicKey, webauthn);
   return winner;
 }

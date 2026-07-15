@@ -74,10 +74,22 @@ export interface Countersignature {
   actor: string;
   policy: Policy;
   timestamp: string;
-  /** base64url raw ed25519 public key of the signing authority */
+  /**
+   * base64url signing key. For a `vouched` receipt or the Default this is the
+   * authority's raw ed25519 key; for a raw-keyed approver, their ed25519 key;
+   * for a passkey approver, a WebAuthn credential descriptor
+   * (`webauthn-ed25519:…` / `webauthn-p256:…`).
+   */
   public_key: string;
-  /** base64url ed25519 signature over the canonical receipt */
+  /** base64url signature: an ed25519 signature over the canonical receipt, OR
+   *  (when `webauthn` is present) the WebAuthn assertion signature. */
   signature: string;
+  /**
+   * Present iff this is a passkey (WebAuthn) receipt. The authenticator output;
+   * the assertion's challenge binds it to the canonical receipt digest. Absent
+   * for ed25519 (vouched / raw-keyed / Default) receipts.
+   */
+  webauthn?: { authenticator_data: string; client_data_json: string };
 }
 
 /** The caller-supplied fields of an Intent; everything else is derived. */

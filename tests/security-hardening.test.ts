@@ -103,6 +103,12 @@ describe("malformed Intents fail closed at the enforcement boundary", () => {
     const bad = { ...intent(1, { default: "approve" }), timeout: 1e15 };
     await expect(awaitWithDefault(bad, never, authority.secretKey)).rejects.toThrow();
   });
+  it("rejects a far-future created_at that would overflow the timer (Codex review P1)", async () => {
+    // Parseable but absurd: deadline - now exceeds Node's setTimeout ceiling, which
+    // would clamp to ~1ms and fire the Default immediately (auto-approve). Fail closed.
+    const bad = { ...intent(1, { default: "approve" }), created_at: "+275760-09-13T00:00:00.000Z" };
+    await expect(awaitWithDefault(bad, never, authority.secretKey)).rejects.toThrow();
+  });
 });
 
 describe("DoS: readBody is size-capped", () => {

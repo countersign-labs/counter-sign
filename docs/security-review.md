@@ -410,3 +410,41 @@ with no residual bypass — and surfaced one non-core UI bug:
   now reports the authoritative `result.decision`, never the clicker's raw choice.
   `SettleResult` was made a discriminated union (`status:"resolved"` ⇒ `decision`
   present) so this can't regress silently. +1 adapter test.
+
+An adversarial re-review of the CS-26/CS-27 fixes challenged the design itself —
+"both collapse distinct lifecycle/failure states into silence" — and found two
+real fail-open paths (all fixed under CS-28):
+
+- **CS-28a · An adapter ERROR was treated as silence, auto-approving a
+  `default:"approve"` Intent (High) — FIXED.** `awaitWithDefault`'s rejection
+  handler mapped *any* adapter-promise rejection to a never-settling promise, so a
+  broken approval channel (a rejected `awaitResolution`, an `abortAll` on
+  `adapter.close()`, a route/network fault) fell through to the timer and, for
+  `default:"approve"`, produced a signed approval — the action ran though the
+  review channel had failed. A pre-deadline adapter rejection now propagates and
+  fails closed; only a *post*-deadline error is ignored (the Default already
+  decided, spec §4). Silence (a never-settling promise) still yields the Default —
+  an error is not silence.
+- **CS-28b · A contradictory early Default was swallowed into an approval (High)
+  — FIXED.** The CS-26 early-Default classifier checked receipt authenticity but
+  not decision consistency, so an authority-signed `default:timeout` receipt
+  saying `reject` on a `default:"approve"` Intent was discarded (treated as an
+  early Default), and the timer then minted an `approve` — malformed/skewed
+  trusted-adapter output flipped to approval. The classifier now also requires the
+  receipt's decision to equal what the runtime would mint (`reject` for a
+  multi-person quorum, else the Intent's `default`); anything else falls through to
+  `verifyResolution` and fails closed.
+- **CS-28c · A Discord interaction the instance did not track stripped the buttons
+  (High) — FIXED.** The CS-27 fix still treated `!pending.has(intentId)` as "the
+  request is closed" and removed the buttons — but that state is also reached
+  before `awaitResolution` registers the entry (`wrapAction` delivers the message
+  first) and on any other process-local instance, so a click during delivery or on
+  a sibling instance griefed a live request (and, for `default:"approve"`, let it
+  fire without a veto). The handler now edits the message **only** when *this*
+  instance produces authoritative terminal state (a resolving `settle`); every
+  other interaction — unknown-here, not-an-approver, malformed — gets a private
+  reply that leaves the message and buttons intact.
+
++4 tests (148 total). These closed the "error/unknown ≠ silence" class the
+adversarial reviewer identified; a genuine never-settling adapter still yields the
+Default on time, and a real early human veto still wins immediately.

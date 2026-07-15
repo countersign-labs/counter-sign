@@ -31,9 +31,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
   the Intent's signed `approvers` may decide — an unlisted channel member's click
   is ignored, so membership is not authority; (2) fix a timeout-reaper race so
   silence reliably yields the signed Default instead of throwing; (3) catch an
-  oversized Telegram webhook body (no unhandled rejection). Demos updated to name
-  the real approver identity.
-- Regression tests encode each exploit (117 total). No wire-format change; v0.1.x receipts still verify.
+  oversized Telegram webhook body (no unhandled rejection); (4) ignore any decision
+  processed at/after the deadline (an event-loop stall could otherwise let a late
+  approval beat the Default). Demos updated to name the real approver identity.
+- Regression tests encode each exploit (118 total). No wire-format change; v0.1.x receipts still verify.
 
 ## [0.1.2] — 2026-07-09
 

@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PendingDecisions, readBody } from "../src/adapter.js";
 import { signDecision } from "../src/core/countersignature.js";
-import { awaitWithDefault, verifyResolution } from "../src/core/defaults.js";
+import { awaitWithDefault, deadline, verifyResolution } from "../src/core/defaults.js";
 import { InvalidCountersignatureError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
 import { generateKeypair, publicKeyFromSecret } from "../src/core/keys.js";
@@ -212,6 +212,21 @@ describe("only named approvers can decide (Codex #1)", () => {
   });
 });
 
+describe("a decision processed after the deadline is ignored (Codex re-review)", () => {
+  afterEach(() => vi.useRealTimers());
+  it("settle rejects a late approval even if the reaper timer is overdue (event-loop stall)", () => {
+    vi.useFakeTimers();
+    const pd = new PendingDecisions();
+    const i = intent(1); // approver m:alice is valid; the deadline gate must still reject
+    void pd.wait(i);
+    // Simulate a stall: the clock jumps past the deadline but timers have NOT run
+    // (setSystemTime does not fire setTimeout), so the reaper entry is still present.
+    vi.setSystemTime(deadline(i) + 1);
+    expect(pd.settle(i.intent_id, "approve", "m:alice", authority.secretKey)).toBeNull();
+    expect(pd.size).toBe(0); // evicted — the Default now decides
+  });
+});
+
 describe("timeout still yields a signed Default with the reaper active (Codex #2)", () => {
   afterEach(() => vi.useRealTimers());
   it("awaitWithDefault + a real pending promise at an equal deadline resolves to the Default, not a rejection", async () => {
@@ -230,42 +245,42 @@ describe("timeout still yields a signed Default with the reaper active (Codex #2
 });
 
 describe("Telegram webhook survives an oversized body (Codex #3)", () => {
-  it("handles a body past the cap without hanging, crashing, or leaking an unhandled rejection", async () => {
-    const a = new TelegramAdapter({ botToken: "t", chatId: "1", authorityKey: authority.secretKey, mode: "webhook", webhookSecret: "s3cret" });
-    const server = createServer(a.webhookHandler());
-    await new Promise<void>((r) => server.listen(0, r));
-    const port = (server.address() as AddressInfo).port;
-    const url = `http://127.0.0.1:${port}/`;
+  it("catches readBody's cap throw (500, no unhandled rejection) instead of leaking it", async () => {
     const rejections: unknown[] = [];
     const onRej = (e: unknown) => rejections.push(e);
     process.on("unhandledRejection", onRej);
+    const a = new TelegramAdapter({ botToken: "t", chatId: "1", authorityKey: authority.secretKey, mode: "webhook", webhookSecret: "s3cret" });
+    const handler = a.webhookHandler();
+    let status = 0;
+    let ended = false;
+    const res = {
+      headersSent: false,
+      writeHead(code: number) {
+        this.headersSent = true;
+        status = code;
+        return this;
+      },
+      end() {
+        ended = true;
+        return this;
+      },
+    };
+    // A mock request that yields a body past the 1 MiB cap in one chunk.
+    const req = {
+      method: "POST",
+      headers: { "x-telegram-bot-api-secret-token": "s3cret" },
+      async *[Symbol.asyncIterator]() {
+        yield Buffer.alloc(2_000_000);
+      },
+    };
     try {
-      // Oversized POST: readBody throws past the cap. The invariant Codex flagged
-      // is that the handler's outer catch prevents an UNHANDLED REJECTION (the old
-      // void-launched handler had none). The client may hang or reset as the server
-      // responds mid-upload — irrelevant to the server's health — so bound the fetch.
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 800);
-      try {
-        await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": "s3cret" },
-          body: "x".repeat(2_000_000),
-          signal: ctrl.signal,
-        });
-      } catch {
-        /* abort or connection reset — expected */
-      }
-      clearTimeout(t);
-      await new Promise((r) => setTimeout(r, 50)); // let any stray rejection surface
-      expect(rejections).toEqual([]); // #3: no unhandled rejection escaped the handler
-      // The server is still alive and serving: an unauthenticated request gets 401.
-      const after = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ update_id: 1 }) });
-      expect(after.status).toBe(401);
+      handler(req as never, res as never);
+      await new Promise((r) => setTimeout(r, 30)); // let the async handler + its .catch run
+      expect(rejections).toEqual([]); // #3: the outer catch swallowed readBody's throw
+      expect(status).toBe(500); // and responded, rather than leaving the request hanging
+      expect(ended).toBe(true);
     } finally {
       process.off("unhandledRejection", onRej);
-      server.closeAllConnections?.(); // the hung oversized connection would otherwise block close()
-      await new Promise<void>((r) => server.close(() => r()));
       a.close();
     }
   });

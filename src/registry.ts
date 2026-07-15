@@ -51,6 +51,13 @@ function chainHash(rec: EnrollmentRecord): string {
   return createHash("sha256").update(canonicalize(rec)).digest("hex");
 }
 
+/** A checkpointed chain head — the record count and tip hash to anchor externally. */
+export interface RegistryHead {
+  length: number;
+  hash: string;
+}
+const REGISTRY_GENESIS = "genesis";
+
 export class ApproverRegistry {
   private records: EnrollmentRecord[] = [];
 
@@ -114,12 +121,22 @@ export class ApproverRegistry {
     return rec;
   }
 
+  /** The current chain head (count + tip hash). Capture and anchor it externally
+   *  (a store the registry writer cannot roll back) to detect tail truncation. */
+  head(): RegistryHead {
+    return { length: this.records.length, hash: this.records.length ? chainHash(this.records[this.records.length - 1]) : REGISTRY_GENESIS };
+  }
+
   /**
    * Verify the whole log against a TRUSTED org-root key: every record is
-   * org-signed, all under the same org key, and the hash chain is intact (so a
-   * record cannot be edited, removed, or reordered without detection).
+   * org-signed, all under the same org key, and the hash chain is intact — so an
+   * edited, removed, or reordered record is detected. A backward-only chain does
+   * NOT by itself detect TAIL TRUNCATION (a valid prefix is a valid log), which
+   * would silently resurrect a revoked key. To close that, capture `head()`
+   * out-of-band and pass it as `expectedHead`: verification then also requires the
+   * log to still contain that many records with the same tip hash at that point.
    */
-  verifyChain(orgPublicKey: string): boolean {
+  verifyChain(orgPublicKey: string, expectedHead?: RegistryHead): boolean {
     let prev: string | null = null;
     for (const rec of this.records) {
       if (rec.org_public_key !== orgPublicKey) return false;
@@ -127,6 +144,13 @@ export class ApproverRegistry {
       const { signature, ...unsigned } = rec;
       if (typeof signature !== "string" || !verifyContext(orgPublicKey, ENROLL_CONTEXT, canonicalize(unsigned), signature)) return false;
       prev = chainHash(rec);
+    }
+    if (expectedHead) {
+      // The log may have grown (append-only), but must not have been truncated or
+      // rolled back below the anchored head.
+      if (this.records.length < expectedHead.length) return false;
+      const at = expectedHead.length > 0 ? chainHash(this.records[expectedHead.length - 1]) : REGISTRY_GENESIS;
+      if (at !== expectedHead.hash) return false;
     }
     return true;
   }
@@ -152,10 +176,19 @@ export class ApproverRegistry {
  * key present as an ACTIVE enrollment for that actor in a registry whose chain
  * verifies under `orgPublicKey`. Throws CountersignError on any mismatch. Compose
  * this before acting on a resolution to require registry-anchored identities.
+ *
+ * Pass `expectedHead` (an externally-anchored `registry.head()`) to also detect
+ * tail truncation / rollback — WITHOUT it a dropped `revoke` record can resurrect
+ * a revoked key, so a deployment that revokes keys MUST anchor the head.
  */
-export function assertApproversEnrolled(intent: Intent, registry: ApproverRegistry, orgPublicKey: string): void {
-  if (!registry.verifyChain(orgPublicKey))
-    throw new CountersignError("approver registry chain or org signature does not verify");
+export function assertApproversEnrolled(
+  intent: Intent,
+  registry: ApproverRegistry,
+  orgPublicKey: string,
+  expectedHead?: RegistryHead,
+): void {
+  if (!registry.verifyChain(orgPublicKey, expectedHead))
+    throw new CountersignError("approver registry chain, org signature, or anchored head does not verify");
   for (const a of intent.approvers) {
     if (a.mode !== "keyed") continue;
     if (!a.public_key || !registry.isActive(a.actor, a.public_key))

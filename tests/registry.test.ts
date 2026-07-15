@@ -93,6 +93,37 @@ describe("chain integrity & revocation", () => {
     expect(reg.isActive("m:alice", alice.publicKey)).toBe(true);
   });
 
+  it("detects TAIL TRUNCATION (rollback) only when the head is anchored", () => {
+    const reg = enrolled(); // enroll alice, enroll bob
+    reg.revoke("m:alice", alice.publicKey, org.secretKey); // 3rd record — the tail
+    expect(reg.isActive("m:alice", alice.publicKey)).toBe(false);
+    const anchoredHead = reg.head(); // captured out-of-band BEFORE tampering
+
+    // Attacker (no org key) drops the trailing revoke, resurrecting alice's key.
+    const lines = reg.toJSONL().trim().split("\n");
+    const truncated = ApproverRegistry.fromJSONL(lines.slice(0, 2).join("\n") + "\n");
+    expect(truncated.isActive("m:alice", alice.publicKey)).toBe(true); // resurrected
+
+    // A backward-only chain accepts a prefix — truncation is UNDETECTED without a head…
+    expect(truncated.verifyChain(orgPub)).toBe(true);
+    // …but the anchored head catches it.
+    expect(truncated.verifyChain(orgPub, anchoredHead)).toBe(false);
+    // A legitimately-unchanged log still matches its anchored head.
+    expect(reg.verifyChain(orgPub, anchoredHead)).toBe(true);
+  });
+
+  it("assertApproversEnrolled with an anchored head rejects a truncated registry that resurrects a revoked key", () => {
+    const reg = new ApproverRegistry();
+    reg.enroll("m:alice", alice.publicKey, org.secretKey, { pop: createEnrollmentProof("m:alice", alice.secretKey) });
+    reg.revoke("m:alice", alice.publicKey, org.secretKey);
+    const head = reg.head();
+    const i = keyedIntent([keyed("m:alice", alice)], 1);
+    const truncated = ApproverRegistry.fromJSONL(reg.toJSONL().trim().split("\n")[0] + "\n");
+    // Without the head the rollback slips through; with it, it fails closed.
+    expect(() => assertApproversEnrolled(i, truncated, orgPub)).not.toThrow();
+    expect(() => assertApproversEnrolled(i, truncated, orgPub, head)).toThrow(/anchored head|active enrollment/);
+  });
+
   it("round-trips through JSONL persistence", () => {
     const reg = enrolled();
     const reloaded = ApproverRegistry.fromJSONL(reg.toJSONL());
@@ -131,7 +162,7 @@ describe("assertApproversEnrolled (strict mode) + end-to-end", () => {
     const reg = new ApproverRegistry();
     reg.enroll("m:alice", alice.publicKey, org.secretKey, { pop: createEnrollmentProof("m:alice", alice.secretKey) });
     const i = keyedIntent([keyed("m:alice", alice)], 1);
-    expect(() => assertApproversEnrolled(i, reg, generateKeypair().publicKey)).toThrow(/chain or org signature/);
+    expect(() => assertApproversEnrolled(i, reg, generateKeypair().publicKey)).toThrow(/chain, org signature/);
   });
 });
 

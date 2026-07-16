@@ -16,10 +16,13 @@ import { normalizeActor, signDecision } from "../src/core/countersignature.js";
 import { assertIntentInvariants, verifyIntent } from "../src/core/intent.js";
 import { publicKeyFromSecret } from "../src/core/keys.js";
 import type { Intent } from "../src/core/types.js";
-import { arg, die } from "./_args.js";
+import { arg, has, die } from "./_args.js";
 
 const intentPath = arg("intent");
 const actor = arg("actor");
+// A present-but-valueless --decision must NOT silently fall back to the "approve"
+// default (that would sign an approval the operator never asked for).
+if (has("decision") && arg("decision") === undefined) die("--decision requires a value (approve or reject)", 2);
 const decision = arg("decision") ?? "approve";
 const key = arg("key") ?? process.env.COUNTERSIGN_APPROVER_KEY;
 

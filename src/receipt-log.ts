@@ -11,7 +11,7 @@ import { DEFAULT_TIMEOUT_ACTOR, deadline } from "./core/defaults.js";
 import { assertIntentInvariants, quorumOf, verifyIntent } from "./core/intent.js";
 import { credentialKeyMaterial, isWebAuthnCredential } from "./core/webauthn.js";
 import { CountersignError } from "./core/errors.js";
-import { toB64url } from "./core/keys.js";
+import { isCanonicalPublicKey, toB64url } from "./core/keys.js";
 import type { Countersignature, Intent, Resolution } from "./core/types.js";
 
 /**
@@ -281,6 +281,11 @@ export class ReceiptLog implements ReceiptSink {
    * intact.
    */
   async verifyAll(opts: VerifyAllOptions = {}): Promise<ReceiptLogReport> {
+    // The authority key must be canonical, or a keyed slot bound to the canonical
+    // authority key slips past the exact-string SoD comparison via a non-canonical alias
+    // (base64url is not injective) — the same class already closed for the agent/org keys.
+    if (opts.authorityKey !== undefined && !isCanonicalPublicKey(opts.authorityKey))
+      throw new CountersignError("verifyAll: authorityKey is not a canonical ed25519 key");
     // An Intent's approver bindings are only a trust anchor if the Intent ITSELF
     // authenticates — otherwise a tampered archived Intent (approver key swapped,
     // signature now invalid) would let a fake receipt signed by the replacement key
@@ -363,7 +368,11 @@ export class ReceiptLog implements ReceiptSink {
             else if (!(Date.parse(cs.timestamp) >= deadline(intent))) reason = "untrusted-key";
             else if (authoritySigner !== undefined && !verifyCountersignature(cs, { trustedKeys: authoritySigner, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else if (approver) {
-            if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) reason = "untrusted-key";
+            // A vouched approver's receipt is authority-signed (verifyResolution binds it
+            // to the authority key), so verify it against the dedicated authorityKey when
+            // supplied — not merely the general trustedKeys allowlist.
+            const authoritySigner = opts.authorityKey ?? opts.trustedKeys;
+            if (authoritySigner !== undefined && !verifyCountersignature(cs, { trustedKeys: authoritySigner, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else {
             reason = "untrusted-key"; // actor is not an approver of this Intent
           }

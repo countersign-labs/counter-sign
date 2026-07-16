@@ -69,6 +69,10 @@ export class SigningLinkAdapter implements Adapter {
   }
 
   async deliver(intent: Intent): Promise<void> {
+    // Refuse new work once closed: otherwise a deliver() racing shutdown would register
+    // a fresh wait and send links, and a default:"approve" request could execute after
+    // the process was told to stop.
+    if (this.closed) throw new CountersignError("signing-link adapter is closed");
     // This adapter serves KEYED (passkey) approvers who sign their OWN receipt via
     // the SigningServer — the inverse of the vouched-only chat/email adapters. A
     // vouched approver has no key to sign a link with; refuse rather than silently

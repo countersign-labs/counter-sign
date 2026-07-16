@@ -285,6 +285,19 @@ export class ReceiptLog implements ReceiptSink {
    * intact.
    */
   async verifyAll(opts: VerifyAllOptions = {}): Promise<ReceiptLogReport> {
+    // Validate option SHAPES up front. An untyped (JS) caller can pass a malformed value —
+    // `null`/a number/a bare object for a string|array option, a single Intent for an array, an
+    // empty-string agent pin. Reject each with a clean CountersignError (every other misconfig
+    // throws one) rather than let it reach a spread/`.filter`/`for…of` and abort the audit with a
+    // raw TypeError, OR silently disable a security pin. `undefined` alone means "absent".
+    if (opts.authorityKey !== undefined && typeof opts.authorityKey !== "string" && !Array.isArray(opts.authorityKey))
+      throw new CountersignError("verifyAll: authorityKey must be a string or an array of strings");
+    if (opts.trustedKeys !== undefined && typeof opts.trustedKeys !== "string" && !Array.isArray(opts.trustedKeys))
+      throw new CountersignError("verifyAll: trustedKeys must be a string or an array of strings");
+    if (opts.trustedAgentKeys !== undefined && !Array.isArray(opts.trustedAgentKeys))
+      throw new CountersignError("verifyAll: trustedAgentKeys must be an array of agent public keys (an empty string does NOT disable the pin)");
+    if (opts.intents !== undefined && !Array.isArray(opts.intents))
+      throw new CountersignError("verifyAll: intents must be an array of Intents");
     // Symmetric to the option empty-array guards below: an empty `intents` array builds an empty
     // binding map, so every receipt on an honest log faults `unknown-intent` (ok:false) — a false
     // tamper alarm. Reject the likely mistake rather than silently misreport a clean log.

@@ -76,6 +76,14 @@ function validateApprovers(approvers: Approver[], quorum: number): void {
     throw new CountersignError(
       "Intent.quorum > 1 requires every approver to be keyed (a vouched slot in a quorum is server-forgeable)",
     );
+  // A quorum larger than the approver list can NEVER be reached: at most
+  // approvers.length distinct approvals exist, so the Intent would silently time out
+  // to its Default on every run. A typo'd quorum must fail at authorship, not quietly
+  // disable approval.
+  if (quorum > approvers.length)
+    throw new CountersignError(
+      `Intent.quorum (${quorum}) exceeds the number of approvers (${approvers.length}) — it can never be reached`,
+    );
 }
 
 export function createIntent(fields: IntentFields, agent: AgentIdentity): Intent {
@@ -89,8 +97,16 @@ export function createIntent(fields: IntentFields, agent: AgentIdentity): Intent
     throw new CountersignError("agent.keypair.publicKey must be a canonical ed25519 key");
   // The embedded public_key MUST correspond to the signing secret, or the Intent
   // would be signed by the secret yet carry an unrelated key — passing wrap-time
-  // checks but failing verifyIntent only AFTER a human approves (a split-brain).
-  if (publicKeyFromSecret(agent.keypair.secretKey) !== agent.keypair.publicKey)
+  // checks but failing verifyIntent only AFTER a human approves (a split-brain). Derive
+  // under a guard so a malformed secret fails closed as a CountersignError, not a raw
+  // RangeError/TypeError from the crypto layer.
+  let derivedAgentKey: string;
+  try {
+    derivedAgentKey = publicKeyFromSecret(agent.keypair.secretKey);
+  } catch {
+    throw new CountersignError("agent.keypair.secretKey is not a valid ed25519 secret key");
+  }
+  if (derivedAgentKey !== agent.keypair.publicKey)
     throw new CountersignError("agent.keypair.publicKey does not correspond to its secretKey");
   if (!fields.action) throw new CountersignError("Intent.action is required");
   if (!fields.summary) throw new CountersignError("Intent.summary is required");

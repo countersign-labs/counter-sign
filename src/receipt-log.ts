@@ -9,7 +9,7 @@ import { canonicalize } from "./core/canonical.js";
 import { normalizeActor, verifyCountersignature, type VerifyOptions } from "./core/countersignature.js";
 import { DEFAULT_TIMEOUT_ACTOR } from "./core/defaults.js";
 import { assertIntentInvariants, verifyIntent } from "./core/intent.js";
-import { isWebAuthnCredential } from "./core/webauthn.js";
+import { credentialKeyMaterial, isWebAuthnCredential } from "./core/webauthn.js";
 import { CountersignError } from "./core/errors.js";
 import { toB64url } from "./core/keys.js";
 import type { Countersignature, Intent, Resolution } from "./core/types.js";
@@ -337,7 +337,12 @@ export class ReceiptLog implements ReceiptSink {
             // slot — verifyResolution rejects exactly this, so the audit must too.
             reason = "untrusted-key";
           } else if (approver?.mode === "keyed") {
-            if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";
+            // A keyed slot must NOT be bound to a trusted authority key (verifyResolution
+            // rejects exactly this — a keyed decision must be the approver's OWN key, not
+            // one the authority also holds). Keep the audit in step with enforcement.
+            const authorityKeys = opts.trustedKeys === undefined ? [] : typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys;
+            if (approver.public_key && authorityKeys.includes(credentialKeyMaterial(approver.public_key))) reason = "untrusted-key";
+            else if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else if (approver || isTimeoutDefault) {
             if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else {

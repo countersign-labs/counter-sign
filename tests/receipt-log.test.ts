@@ -161,6 +161,20 @@ describe("verifyAll()", () => {
     expect(r.faults).toEqual([{ index: 1, intent_id: stray.intent_id, actor: "local:a", reason: "unknown-intent" }]);
   });
 
+  it("faults a keyed slot bound to a trusted authority key (audit matches verifyResolution)", async () => {
+    // An Intent that binds a keyed approver to the AUTHORITY key, with a receipt signed
+    // by that authority key: verifyResolution rejects it (a keyed slot must be the
+    // approver's OWN key), so the audit must not report it valid either.
+    const i = createIntent(
+      { action: "demo.op", summary: "x", risk_tier: "high", approvers: [{ actor: "local:a", mode: "keyed", public_key: authorityPub }], quorum: 1, timeout: 300, default: "reject" },
+      agent,
+    );
+    await log.append(signDecision(i, "approve", "local:a", authority, "approver"));
+    const r = await log.verifyAll({ intents: [i], trustedKeys: authorityPub });
+    expect(r.ok).toBe(false);
+    expect(r.faults.some((f) => f.actor === "local:a" && f.reason === "untrusted-key")).toBe(true);
+  });
+
   it("does NOT trust a TAMPERED Intent's approver binding (fake receipt via a swapped key)", async () => {
     const i = intent(2); // keyed local:a / local:b with distinct keys
     const evil = generateKeypair();

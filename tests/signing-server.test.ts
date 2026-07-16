@@ -340,6 +340,66 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     await expect(deploy()).rejects.toThrow(/SAME policy|differs/);
   });
 
+  it("HEADLINE: a decision made DURING deliver's notify loop is NOT lost (no fail-open to Default)", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const i = intentWith([a.approver], 1);
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    // notify() itself drives the approval — so the decision lands WHILE deliver() is
+    // still running, resolving+evicting the pending entry. The captured promise must
+    // survive so awaitResolution() returns the real decision, not a fresh empty wait.
+    const adapter = new SigningLinkAdapter({
+      server: signer,
+      notify: async (l) => {
+        const token = new URL(l.url.replace(origin, base)).searchParams.get("token");
+        const ch = await getChallenge(base, token, "approve");
+        await record(base, token, "approve", ch, a.sign);
+      },
+    });
+    await adapter.deliver(i);
+    expect((await adapter.awaitResolution(i)).decision).toBe("approve"); // would hang/Default before the fix
+  });
+
+  it("a delivery failure AFTER a decision landed keeps the approval (does not throw)", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const b = passkeyApprover("m:cto");
+    const i = intentWith([a.approver, b.approver], 1); // quorum 1 — A alone resolves it
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    const adapter = new SigningLinkAdapter({
+      server: signer,
+      notify: async (l) => {
+        if (l.actor === "m:ceo") {
+          const token = new URL(l.url.replace(origin, base)).searchParams.get("token");
+          const ch = await getChallenge(base, token, "approve");
+          await record(base, token, "approve", ch, a.sign); // A approves (quorum met)
+        } else {
+          throw new Error("delivery to B failed"); // …then B's link fails
+        }
+      },
+    });
+    await expect(adapter.deliver(i)).resolves.toBeUndefined(); // does NOT throw the delivery error
+    expect((await adapter.awaitResolution(i)).decision).toBe("approve");
+  });
+
+  it("reconcileWebAuthn is not fooled by a duplicate origin masking a real divergence", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const signer = new SigningServer({ pending, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin, "https://other.example"] }, baseUrl: origin });
+    const adapter = new SigningLinkAdapter({ server: signer, notify: () => {} });
+    const deploy = wrapAction(
+      () => "x",
+      { action: "a", summary: "s", risk_tier: "critical", approvers: [a.approver], quorum: 1, timeout: 300, default: "reject" },
+      adapter,
+      { agent, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin, origin] } }, // dupe hides the missing 2nd origin
+    );
+    await expect(deploy()).rejects.toThrow(/SAME policy|differs/);
+  });
+
   it("refuses to deliver a vouched approver (no key to sign a link with)", async () => {
     const pending = new PendingDecisions();
     const { signer } = makeServer(pending);

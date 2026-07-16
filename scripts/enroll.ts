@@ -23,16 +23,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { ApproverRegistry, createEnrollmentProof, type PasskeyEnrollmentProof } from "../src/registry.js";
 import { isWebAuthnCredential } from "../src/core/webauthn.js";
 import { publicKeyFromSecret } from "../src/core/keys.js";
-
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
-}
-const has = (name: string) => process.argv.includes(`--${name}`);
-function die(msg: string, code = 1): never {
-  process.stderr.write(msg + "\n");
-  process.exit(code);
-}
+import { arg, has, die } from "./_args.js";
 
 const registryPath = arg("registry");
 const actor = arg("actor");

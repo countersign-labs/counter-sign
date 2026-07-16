@@ -16,15 +16,7 @@ import { normalizeActor, signDecision } from "../src/core/countersignature.js";
 import { assertIntentInvariants, verifyIntent } from "../src/core/intent.js";
 import { publicKeyFromSecret } from "../src/core/keys.js";
 import type { Intent } from "../src/core/types.js";
-
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : undefined;
-}
-function die(msg: string, code = 1): never {
-  process.stderr.write(msg + "\n");
-  process.exit(code);
-}
+import { arg, die } from "./_args.js";
 
 const intentPath = arg("intent");
 const actor = arg("actor");

@@ -126,12 +126,6 @@ export class SigningServer {
     this.cfg.pending.cancel(intent.intent_id, err);
   }
 
-  /** True while the Intent is still awaiting a decision (not yet resolved/evicted) —
-   *  lets a caller distinguish "a decision already landed" from "still pending". */
-  isPending(intent: Intent): boolean {
-    return this.cfg.pending.has(intent.intent_id);
-  }
-
   /** Release every in-flight wait (graceful shutdown) — rejects awaiting resolutions. */
   close(): void {
     this.cfg.pending.abortAll(new Error("signing server closed"));

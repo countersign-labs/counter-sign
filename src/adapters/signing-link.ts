@@ -95,39 +95,35 @@ export class SigningLinkAdapter implements Adapter {
     });
     // Register the collection point BEFORE any link goes out (record() needs the
     // pending entry to exist) and CAPTURE the promise so a decision that lands during
-    // the loop isn't lost when awaitResolution() runs after deliver() returns.
+    // delivery isn't lost when awaitResolution() runs after deliver() returns.
     const pending = this.server.awaitResolution(intent);
     this.captured.set(intent.intent_id, pending);
-    // Safety handler: if this wait is later rejected by a fail-closed cancel() or a
-    // concurrent close()/abort, don't let it surface as an unhandled rejection. The real
-    // consumer (awaitResolution → awaitWithDefault) still observes the same outcome.
-    pending.catch(() => {});
+    // Track whether the wait actually SETTLED — a real decision or a cancel/abort. This
+    // is distinct from the deadline reaper merely evicting the entry (which leaves the
+    // promise pending); `isPending` conflates the two, so a slow delivery crossing the
+    // deadline would look "resolved" and skip the fail-closed guard below (a fail-open
+    // under default:"approve"). The flag also serves as the no-unhandled-rejection catch.
+    let settled = false;
+    pending.then(() => { settled = true; }, () => { settled = true; });
 
-    // BEST-EFFORT delivery. One approver's channel being down must NOT abort a quorum
-    // the OTHER approvers can still satisfy (any M-of-N with M < N, and every 1-of-N),
-    // and an approval already in flight must not be cancelled out from under itself.
-    // Send every link, counting successes.
-    let delivered = 0;
-    let firstError: unknown;
-    for (const link of links) {
-      try {
-        await this.notify(link);
-        delivered += 1;
-      } catch (err) {
-        firstError ??= err;
-      }
-    }
-    // A partial delivery is only safe to SWALLOW when the eventual outcome fails safe:
-    // the Intent's Default is `reject` (timeout → reject), or a real decision already
-    // landed. Fail CLOSED otherwise — a TOTAL failure (nobody can decide), or ANY failure
-    // under a `default:"approve"` Intent (the approve-Default must not fire while a named
-    // approver never received their veto link). The isPending guard means a decision that
-    // already resolved during the loop is honored, not thrown away.
+    // BEST-EFFORT delivery, CONCURRENTLY — independent channels; one slow/hung channel
+    // must not block the others or sum their latencies. One approver's channel being down
+    // must NOT abort a quorum the others can still satisfy.
+    // `Promise.resolve().then(...)` so a SYNCHRONOUS throw from notify becomes a rejected
+    // result instead of escaping the map before allSettled sees it.
+    const results = await Promise.allSettled(links.map((l) => Promise.resolve().then(() => this.notify(l))));
+    const delivered = results.filter((r) => r.status === "fulfilled").length;
+    const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected")?.reason;
+
+    // Swallow a partial delivery only when it fails SAFE: a decision already settled, or
+    // the Default is `reject` (timeout → reject). Fail CLOSED on a TOTAL failure (nobody
+    // can decide), or ANY failure under a `default:"approve"` Intent — the approve-Default
+    // must not fire while a named approver never got their veto link. Using `settled`
+    // (not isPending) means the deadline reaper can't mask an incomplete delivery.
     const anyFailed = delivered < links.length;
-    const stillPending = this.server.isPending(intent);
-    if (stillPending && (delivered === 0 || (anyFailed && intent.default === "approve"))) {
+    if (!settled && (delivered === 0 || (anyFailed && intent.default === "approve"))) {
       this.captured.delete(intent.intent_id);
-      const err = firstError instanceof Error ? firstError : new CountersignError(`delivery incomplete for intent ${intent.intent_id} — failing closed (Default is "approve")`);
+      const err = firstError instanceof Error ? firstError : new CountersignError(`delivery incomplete for intent ${intent.intent_id} — failing closed`);
       this.server.cancel(intent, err);
       throw err;
     }

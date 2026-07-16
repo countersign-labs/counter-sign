@@ -135,7 +135,11 @@ export class SigningServer {
     return (req, res) => {
       void (async () => {
         const url = new URL(req.url ?? "/", this.cfg.baseUrl);
-        if (url.pathname !== "/sign") {
+        // Match the "/sign" route at the END of the path, so a proxy-prefixed mount
+        // ("/approvals/sign") works whether the proxy preserves or strips the prefix.
+        // The token authorizes the request, not the path, so serving the page at any
+        // "*/sign" is safe.
+        if (!url.pathname.endsWith("/sign")) {
           res.writeHead(404).end();
           return;
         }
@@ -277,7 +281,9 @@ const bytesToB64url = b => btoa(String.fromCharCode(...new Uint8Array(b))).repla
 document.getElementById("summary").textContent = D.summary;
 document.getElementById("action").textContent = D.action + (D.quorum>1 ? "  ("+D.quorum+" approvals required)" : "");
 const status = document.getElementById("status");
-const post = (b) => fetch("/sign", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(b) });
+// POST back to the SAME path this page was served from, so a proxy-prefixed mount
+// (…/approvals/sign) reaches the handler instead of the origin-root /sign.
+const post = (b) => fetch(location.pathname, { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(b) });
 async function decide(decision){
   status.textContent = "Waiting for your passkey…";
   try {

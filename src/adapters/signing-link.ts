@@ -16,6 +16,7 @@
 
 import { CountersignError } from "../core/errors.js";
 import type { Adapter } from "../adapter.js";
+import type { WebAuthnPolicy } from "../core/webauthn.js";
 import type { Intent, Resolution } from "../core/types.js";
 import type { SigningServer } from "../signing.js";
 
@@ -44,15 +45,17 @@ export interface SigningLinkAdapterConfig {
 
 export class SigningLinkAdapter implements Adapter {
   readonly channel: string;
+  /** The SigningServer's RP policy, exposed so wrapAction verifies with the SAME
+   *  policy the server signs against (a divergence would reject a valid assertion). */
+  readonly webauthn: WebAuthnPolicy;
   private readonly server: SigningServer;
   private readonly notify: (link: SigningLink) => void | Promise<void>;
-  /** Promises registered by deliver(), consumed by the matching awaitResolution(). */
-  private readonly waiting = new Map<string, Promise<Resolution>>();
 
   constructor(cfg: SigningLinkAdapterConfig) {
     this.server = cfg.server;
     this.notify = cfg.notify;
     this.channel = cfg.channel ?? "signing";
+    this.webauthn = cfg.server.webauthn;
   }
 
   async deliver(intent: Intent): Promise<void> {
@@ -71,28 +74,21 @@ export class SigningLinkAdapter implements Adapter {
     });
     // Register the collection point BEFORE any link goes out: record() needs the
     // pending entry to exist, so an approver who taps immediately must not race a
-    // not-yet-registered Intent. awaitResolution() consumes this same promise.
-    if (!this.waiting.has(intent.intent_id)) this.waiting.set(intent.intent_id, this.server.awaitResolution(intent));
+    // not-yet-registered Intent. wait() is idempotent, so awaitResolution() returns
+    // this very promise. Hold it here only to swallow the rejection cancel() raises
+    // on a delivery failure (nobody awaits it on that path → unhandled rejection).
+    const pending = this.server.awaitResolution(intent);
     try {
       for (const link of links) await this.notify(link);
     } catch (err) {
-      // Delivery failed: reclaim BOTH registrations so a failed deliver (which
-      // permits notify to reject) can't leak the Intent + its promise. Nobody is
-      // awaiting the wait on this path, so swallow the rejection cancel() raises
-      // (else an unhandled rejection), then rethrow the real delivery error.
-      const pending = this.waiting.get(intent.intent_id);
-      this.waiting.delete(intent.intent_id);
-      pending?.catch(() => {});
+      pending.catch(() => {});
       this.server.cancel(intent, err instanceof Error ? err : new Error(String(err)));
       throw err;
     }
   }
 
   awaitResolution(intent: Intent): Promise<Resolution> {
-    // Consume the promise deliver() registered (one wait per Intent); fall back to
-    // registering here if awaitResolution is somehow called without a prior deliver.
-    const p = this.waiting.get(intent.intent_id);
-    this.waiting.delete(intent.intent_id);
-    return p ?? this.server.awaitResolution(intent);
+    // The idempotent wait() returns the same promise deliver() registered.
+    return this.server.awaitResolution(intent);
   }
 }

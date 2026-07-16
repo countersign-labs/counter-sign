@@ -15,6 +15,7 @@ import { PendingDecisions, readBody } from "./adapter.js";
 import { canonicalize } from "./core/canonical.js";
 import { fromB64url, publicKeyFromSecret, signContext, toB64url, utf8, verifyContext } from "./core/keys.js";
 import { normalizeActor } from "./core/countersignature.js";
+import { deadline } from "./core/defaults.js";
 import { quorumOf } from "./core/intent.js";
 import { isWebAuthnCredential, type WebAuthnPolicy } from "./core/webauthn.js";
 import { COUNTERSIGN_VERSION, COUNTERSIGNATURE_CONTEXT, LINK_CONTEXT, type Approver, type Countersignature, type Intent } from "./core/types.js";
@@ -103,6 +104,12 @@ export class SigningServer {
     this.authorityPublicKey = publicKeyFromSecret(cfg.authorityKey);
   }
 
+  /** The RP policy this server verifies passkey assertions against — so a caller
+   *  (e.g. wrapAction) can verify with the SAME policy rather than a divergent copy. */
+  get webauthn(): WebAuthnPolicy {
+    return this.cfg.webauthn;
+  }
+
   /** Await a keyed approver's decision — the collection point for record(). */
   awaitResolution(intent: Intent) {
     return this.cfg.pending.wait(intent);
@@ -118,8 +125,11 @@ export class SigningServer {
   signingUrl(intent: Intent, actor: string): string {
     const approver = intent.approvers.find((a) => normalizeActor(a.actor) === normalizeActor(actor));
     if (!approver || approver.mode !== "keyed") throw new Error(`actor ${actor} is not a keyed approver of this intent`);
-    if (!isWebAuthnCredential(approver.public_key ?? "")) throw new Error(`actor ${actor} is not a passkey approver`);
-    const token = createSigningToken(intent, approver.actor, this.cfg.authorityKey, deadlineOf(intent));
+    if (!isWebAuthnCredential(approver.public_key ?? ""))
+      throw new Error(
+        `actor ${actor} is a raw-ed25519 (bot/CLI) keyed approver, not a passkey — the SigningServer signing page serves passkeys only; a raw-keyed approver signs out of band with the approve CLI, so it cannot be delivered through this adapter`,
+      );
+    const token = createSigningToken(intent, approver.actor, this.cfg.authorityKey, deadline(intent));
     // Append "/sign" to the base's FULL path (not the origin): a proxy-prefixed
     // deployment ("https://host/approvals") must yield ".../approvals/sign", not
     // ".../sign". Strip a trailing slash first so "https://host/" doesn't produce
@@ -255,9 +265,6 @@ export class SigningServer {
   }
 }
 
-function deadlineOf(intent: Intent): number {
-  return Date.parse(intent.created_at) + intent.timeout * 1000;
-}
 
 /** The self-contained signing page. `dataJson` seeds the WebAuthn ceremony. */
 function page(errorMessage: string | null, dataJson: string, nonce = ""): string {

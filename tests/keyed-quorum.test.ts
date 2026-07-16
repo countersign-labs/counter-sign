@@ -238,6 +238,14 @@ describe("keyed quorum — negative (a compromised authority key cannot forge it
     expect(() => assertIntentInvariants({ ...i, agent: { ...i.agent, public_key: alias } })).toThrow(/canonical/);
   });
 
+  it("createIntent rejects an agent keypair whose public_key does not match its secret", () => {
+    const other = generateKeypair();
+    const fields = { action: "a", summary: "s", risk_tier: "low" as const, approvers: [keyed("m:alice", alice)], quorum: 1, timeout: 60, default: "reject" as const };
+    // publicKey from a DIFFERENT keypair than secretKey → the Intent would be signed by
+    // the secret but carry an unrelated key, failing verifyIntent only after approval.
+    expect(() => createIntent(fields, { id: "agent:x", keypair: { publicKey: other.publicKey, secretKey: agent.keypair.secretKey } })).toThrow(/does not correspond/);
+  });
+
   it("createIntent rejects an invalid agent identity at authorship (fail fast, not after delivery)", () => {
     const fields = { action: "a", summary: "s", risk_tier: "low" as const, approvers: [keyed("m:alice", alice)], quorum: 1, timeout: 60, default: "reject" as const };
     // Empty agent id — downstream verification would reject it, so refuse it here.

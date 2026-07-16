@@ -20,6 +20,13 @@ import type { Approver, Countersignature, Decision, Intent, Resolution } from ".
 export interface Adapter {
   /** channel name used as the actor prefix, e.g. "telegram" */
   readonly channel: string;
+  /**
+   * The WebAuthn policy this adapter's signer verifies passkey assertions against,
+   * if any. Exposed so wrapAction can verify with the SAME policy the adapter's
+   * SigningServer signs against — a divergence would reject a valid assertion after
+   * approval. Absent for adapters that don't serve passkeys.
+   */
+  readonly webauthn?: WebAuthnPolicy;
   /** Push the Intent to the approver's channel. */
   deliver(intent: Intent): Promise<void>;
   /**
@@ -61,6 +68,8 @@ interface PendingEntry {
   approvals: Map<string, Countersignature>;
   resolve: (r: Resolution) => void;
   reject: (err: Error) => void;
+  /** the promise handed to every wait() for this intent (so a repeat wait is idempotent) */
+  promise: Promise<Resolution>;
   /** reaper that evicts the entry at the Intent's deadline (prevents unbounded growth) */
   timer?: ReturnType<typeof setTimeout>;
 }
@@ -84,48 +93,61 @@ export class PendingDecisions {
   private entries = new Map<string, PendingEntry>();
 
   wait(intent: Intent): Promise<Resolution> {
-    return new Promise((resolve, reject) => {
-      const entry: PendingEntry = {
-        intent,
-        quorum: quorumOf(intent),
-        // Only `vouched` approvers can be settled by the server (it signs on their
-        // behalf). A `keyed` approver signs their own receipt off-server, so the
-        // server must not vouch for them here. `default:timeout` is reserved and can
-        // never be a human approver — mirrors verifyResolution's choke-point checks.
-        approverSet: new Set(
-          intent.approvers
-            .filter((a) => a.mode === "vouched")
-            .map((a) => normalizeActor(a.actor))
-            .filter((a) => a !== DEFAULT_TIMEOUT_ACTOR),
-        ),
-        keyedApprovers: new Map(
-          intent.approvers
-            .filter((a) => a.mode === "keyed" && normalizeActor(a.actor) !== DEFAULT_TIMEOUT_ACTOR)
-            .map((a) => [normalizeActor(a.actor), a] as const),
-        ),
-        approvals: new Map(),
-        resolve,
-        reject,
-      };
-      this.entries.set(intent.intent_id, entry);
-      // Evict the entry at the deadline so a timed-out Intent doesn't leak
-      // forever (the runtime's awaitWithDefault fires the actual Default; this
-      // only reclaims memory). Rejection is swallowed by awaitWithDefault.
-      const remaining = deadline(intent) - Date.now();
-      if (Number.isFinite(remaining)) {
-        entry.timer = setTimeout(() => {
-          // Evict the timed-out entry to reclaim memory, but do NOT reject this
-          // promise: awaitWithDefault races it against its OWN default timer, and
-          // rejecting here (the reaper is registered first, so at an equal deadline
-          // it fires first) would make that race reject instead of resolving to the
-          // signed Default. Leave the promise pending; it is GC'd once the race
-          // settles to the Default. A late decision after eviction is ignored by
-          // settle() (unknown intent_id → null), matching "the Default already decided".
-          if (this.entries.get(intent.intent_id) === entry) this.entries.delete(intent.intent_id);
-        }, Math.max(0, remaining));
-        entry.timer.unref?.();
-      }
+    // Idempotent: exactly one pending decision per intent_id. A second wait() for the
+    // same intent returns the SAME promise instead of overwriting the entry — an
+    // overwrite would strand the first promise (its resolve/reject would be orphaned,
+    // so it could never settle).
+    const existing = this.entries.get(intent.intent_id);
+    if (existing) return existing.promise;
+
+    let resolve!: (r: Resolution) => void;
+    let reject!: (err: Error) => void;
+    const promise = new Promise<Resolution>((res, rej) => {
+      resolve = res;
+      reject = rej;
     });
+    const entry: PendingEntry = {
+      intent,
+      quorum: quorumOf(intent),
+      // Only `vouched` approvers can be settled by the server (it signs on their
+      // behalf). A `keyed` approver signs their own receipt off-server, so the
+      // server must not vouch for them here. `default:timeout` is reserved and can
+      // never be a human approver — mirrors verifyResolution's choke-point checks.
+      approverSet: new Set(
+        intent.approvers
+          .filter((a) => a.mode === "vouched")
+          .map((a) => normalizeActor(a.actor))
+          .filter((a) => a !== DEFAULT_TIMEOUT_ACTOR),
+      ),
+      keyedApprovers: new Map(
+        intent.approvers
+          .filter((a) => a.mode === "keyed" && normalizeActor(a.actor) !== DEFAULT_TIMEOUT_ACTOR)
+          .map((a) => [normalizeActor(a.actor), a] as const),
+      ),
+      approvals: new Map(),
+      resolve,
+      reject,
+      promise,
+    };
+    this.entries.set(intent.intent_id, entry);
+    // Evict the entry at the deadline so a timed-out Intent doesn't leak
+    // forever (the runtime's awaitWithDefault fires the actual Default; this
+    // only reclaims memory). Rejection is swallowed by awaitWithDefault.
+    const remaining = deadline(intent) - Date.now();
+    if (Number.isFinite(remaining)) {
+      entry.timer = setTimeout(() => {
+        // Evict the timed-out entry to reclaim memory, but do NOT reject this
+        // promise: awaitWithDefault races it against its OWN default timer, and
+        // rejecting here (the reaper is registered first, so at an equal deadline
+        // it fires first) would make that race reject instead of resolving to the
+        // signed Default. Leave the promise pending; it is GC'd once the race
+        // settles to the Default. A late decision after eviction is ignored by
+        // settle() (unknown intent_id → null), matching "the Default already decided".
+        if (this.entries.get(intent.intent_id) === entry) this.entries.delete(intent.intent_id);
+      }, Math.max(0, remaining));
+      entry.timer.unref?.();
+    }
+    return promise;
   }
 
   get size(): number {

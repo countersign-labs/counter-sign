@@ -14,7 +14,7 @@ import { canonicalize } from "./core/canonical.js";
 import { normalizeActor } from "./core/countersignature.js";
 import { isCanonicalPublicKey, publicKeyFromSecret, signContext, toB64url, utf8, verifyContext } from "./core/keys.js";
 import { isValidCredentialDescriptor, isWebAuthnCredential, verifyWebAuthnAssertion, type WebAuthnAssertion, type WebAuthnPolicy } from "./core/webauthn.js";
-import { assertIntentInvariants } from "./core/intent.js";
+import { assertIntentInvariants, verifyIntent } from "./core/intent.js";
 import { CountersignError } from "./core/errors.js";
 import { COUNTERSIGN_VERSION, type Intent } from "./core/types.js";
 
@@ -53,8 +53,12 @@ function popMessage(actor: string, publicKey: string): string {
  * binding the actor and the exact credential being enrolled, under the enrollment
  * domain-separation context. The enrollee runs navigator.credentials.get with this
  * challenge; `enroll` re-derives it and verifies the assertion against the bound
- * credential + RP policy, so an intermediary cannot substitute a credential it
- * controls for the actor.
+ * credential + RP policy. This proves the enrollee HOLDS the credential (so a key
+ * nobody controls, or a typo'd key, can't be enrolled) — it does NOT by itself prove
+ * the credential belongs to `actor`, since anyone holding the key can answer the
+ * challenge for any actor string. Binding the credential to the right actor is the
+ * ORG ROOT's responsibility: it must verify the enrollee's identity out of band
+ * before signing the record. The registry's trust anchor is the org root, not the PoP.
  */
 export function enrollmentChallenge(actor: string, publicKey: string): string {
   return toB64url(createHash("sha256").update(utf8(`${ENROLL_POP_CONTEXT}\n${popMessage(actor, publicKey)}`)).digest());
@@ -110,16 +114,19 @@ export class ApproverRegistry {
   }
 
   /**
-   * Enroll an approver key, attested by the org-root key. EVERY key requires proof
-   * of possession before the org root attests it, so a compromised enrollment
-   * intermediary cannot substitute a credential it controls for the actor:
+   * Enroll an approver key, attested by the org-root key. EVERY key requires proof of
+   * possession before the org root attests it — so a key nobody controls (or a typo'd
+   * key) can't be enrolled:
    *  - a RAW ed25519 key needs `opts.pop` (createEnrollmentProof) — the approver's
    *    own signature over their actor + key;
    *  - a PASSKEY descriptor needs `opts.webauthnPop` — a WebAuthn assertion over
    *    `enrollmentChallenge(actor, key)`, proving the authenticator holds the
    *    credential, verified against the bound key + RP policy.
-   * Fails closed on a malformed key, a missing/invalid PoP, or an already-active
-   * binding.
+   * NOTE: PoP proves POSSESSION, not that the key belongs to `actor` — a holder of the
+   * key can answer the challenge for any actor. The org root (which signs the record)
+   * is responsible for verifying the enrollee's identity out of band before enrolling;
+   * that identity check, not the PoP, is what binds the actor to the key. Fails closed
+   * on a malformed key, a missing/invalid PoP, or an already-active binding.
    */
   enroll(
     actor: string,
@@ -261,8 +268,12 @@ export function assertApproversEnrolled(
 ): void {
   // Self-validate the Intent so this holds even when called standalone (its own doc
   // says to compose it with verifyResolution, but don't rely on caller discipline):
-  // a malformed/hostile Intent's approvers must never be trusted here either.
+  // a malformed/hostile Intent's approvers must never be trusted here either. Verify
+  // the agent signature too — like verifyResolution and ReceiptLog.verifyAll do —
+  // before trusting the Intent's keyed-approver bindings.
   assertIntentInvariants(intent);
+  if (!verifyIntent(intent))
+    throw new CountersignError(`intent ${intent.intent_id} does not carry a valid agent signature`);
   if (!isCanonicalPublicKey(expectedAuthorityPublicKey))
     throw new CountersignError("expected authority public key is not a canonical ed25519 key");
   // Both keys must be canonical or the distinctness compare below could be dodged by

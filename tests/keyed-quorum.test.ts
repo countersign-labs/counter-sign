@@ -238,6 +238,16 @@ describe("keyed quorum — negative (a compromised authority key cannot forge it
     expect(() => assertIntentInvariants({ ...i, agent: { ...i.agent, public_key: alias } })).toThrow(/canonical/);
   });
 
+  it("createIntent rejects an invalid agent identity at authorship (fail fast, not after delivery)", () => {
+    const fields = { action: "a", summary: "s", risk_tier: "low" as const, approvers: [keyed("m:alice", alice)], quorum: 1, timeout: 60, default: "reject" as const };
+    // Empty agent id — downstream verification would reject it, so refuse it here.
+    expect(() => createIntent(fields, { id: "", keypair: agent.keypair })).toThrow(/agent\.id/);
+    // A non-canonical (aliased) agent public key — the very thing the canonical gate exists for.
+    const alias = nonCanonicalAlias(agent.keypair.publicKey);
+    expect(alias).not.toBe("");
+    expect(() => createIntent(fields, { id: "agent:x", keypair: { publicKey: alias, secretKey: agent.keypair.secretKey } })).toThrow(/canonical/);
+  });
+
   it("rejects a non-canonical expected authority public key (alias bypass)", () => {
     const i = keyedIntent(2);
     const r = res("approve", [

@@ -120,10 +120,12 @@ export class SigningServer {
     if (!approver || approver.mode !== "keyed") throw new Error(`actor ${actor} is not a keyed approver of this intent`);
     if (!isWebAuthnCredential(approver.public_key ?? "")) throw new Error(`actor ${actor} is not a passkey approver`);
     const token = createSigningToken(intent, approver.actor, this.cfg.authorityKey, deadlineOf(intent));
-    // Build with URL semantics so a baseUrl with a trailing slash
-    // ("https://host/") still yields ".../sign" (not "//sign", which handler()
-    // 404s) and the token is query-encoded correctly.
-    const url = new URL("/sign", this.cfg.baseUrl);
+    // Append "/sign" to the base's FULL path (not the origin): a proxy-prefixed
+    // deployment ("https://host/approvals") must yield ".../approvals/sign", not
+    // ".../sign". Strip a trailing slash first so "https://host/" doesn't produce
+    // "//sign" (which handler() 404s). searchParams query-encodes the token.
+    const base = this.cfg.baseUrl.replace(/\/+$/, "");
+    const url = new URL(`${base}/sign`);
     url.searchParams.set("token", token);
     return url.toString();
   }

@@ -78,6 +78,14 @@ describe("enrollment", () => {
     expect(reg.isActive("m:ceo", cred)).toBe(true);
   });
 
+  it("fromJSONL fails closed on a non-object line (no verifyChain TypeError)", () => {
+    // A "null"/"123"/"[]" line survives the blank-line filter and would become a record
+    // that verifyChain/activeKeys dereference → uncaught TypeError. Reject it at load.
+    for (const bad of ["null\n", "123\n", "[]\n", '"str"\n']) {
+      expect(() => ApproverRegistry.fromJSONL(bad)).toThrow(/malformed registry line/);
+    }
+  });
+
   it("refuses a malformed key and a duplicate active enrollment", () => {
     const reg = new ApproverRegistry();
     expect(() => reg.enroll("m:x", "not-a-key", org.secretKey)).toThrow(/malformed/);

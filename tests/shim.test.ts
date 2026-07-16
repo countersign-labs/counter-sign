@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { Adapter } from "../src/adapter.js";
 import { signDecision } from "../src/core/countersignature.js";
 import { IntentRejectedError } from "../src/core/errors.js";
-import { generateKeypair } from "../src/core/keys.js";
-import type { Countersignature, Decision, Intent, Resolution } from "../src/core/types.js";
+import { generateKeypair, publicKeyFromSecret } from "../src/core/keys.js";
+import type { Approver, Countersignature, Decision, Intent, Resolution } from "../src/core/types.js";
 import { wrapAction } from "../src/shim.js";
 
 const authority = generateKeypair();
@@ -65,6 +65,48 @@ describe("wrapAction happy path", () => {
     await guarded();
     await guarded();
     expect(adapter.delivered[0].intent_id).not.toBe(adapter.delivered[1].intent_id);
+  });
+});
+
+describe("wrapAction pre-delivery guards (fail fast, no post-approval split-brain)", () => {
+  const keyedFields = (approver: Approver) => ({
+    action: "prod.deploy", summary: "Deploy", risk_tier: "critical" as const,
+    approvers: [approver], quorum: 1, timeout: 300, default: "reject" as const,
+  });
+
+  it("rejects a passkey approver with no webauthn policy BEFORE delivery", async () => {
+    const adapter = instantAdapter("approve");
+    const passkey: Approver = { actor: "m:ceo", mode: "keyed", public_key: `webauthn-ed25519:${generateKeypair().publicKey}` };
+    const guarded = wrapAction(async () => "ran", keyedFields(passkey), adapter, { authorityKey: authority.secretKey });
+    await expect(guarded()).rejects.toThrow(/passkey.*webauthn|webauthn.*policy/i);
+    expect(adapter.delivered).toHaveLength(0); // guard fired before deliver()
+  });
+
+  it("rejects agent key == authority key BEFORE delivery", async () => {
+    const adapter = instantAdapter("approve");
+    const guarded = wrapAction(async () => "ran", fields, adapter, { agent: { id: "agent:evil", keypair: authority }, authorityKey: authority.secretKey });
+    await expect(guarded()).rejects.toThrow(/agent key must be distinct/);
+    expect(adapter.delivered).toHaveLength(0);
+  });
+
+  it("rejects a keyed approver bound to the authority key BEFORE delivery", async () => {
+    const adapter = instantAdapter("approve");
+    const bound: Approver = { actor: "m:ceo", mode: "keyed", public_key: publicKeyFromSecret(authority.secretKey) };
+    const guarded = wrapAction(async () => "ran", keyedFields(bound), adapter, { authorityKey: authority.secretKey });
+    await expect(guarded()).rejects.toThrow(/bound to the authority key/);
+    expect(adapter.delivered).toHaveLength(0);
+  });
+
+  it("still delivers a passkey approver WITH a webauthn policy (guard is not over-broad)", async () => {
+    // A vouched instantAdapter can't actually serve a keyed approver, but the guard must
+    // let it PAST — delivery is what fails here, not the pre-delivery guard.
+    const adapter = instantAdapter("approve");
+    const passkey: Approver = { actor: "m:ceo", mode: "keyed", public_key: `webauthn-ed25519:${generateKeypair().publicKey}` };
+    const guarded = wrapAction(async () => "ran", keyedFields(passkey), adapter, { authorityKey: authority.secretKey, webauthn: { rpId: "example.com", allowedOrigins: ["https://example.com"] } });
+    // The pre-delivery guard passes (webauthn supplied), so it reaches delivery — which
+    // then fails at resolution (this vouched adapter can't serve a keyed approver).
+    await expect(guarded()).rejects.toThrow();
+    expect(adapter.delivered).toHaveLength(1); // delivery DID happen — the guard let it through
   });
 });
 

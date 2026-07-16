@@ -4,10 +4,10 @@
 
 import { authorityKeyFromEnv, warnOnce, type Adapter } from "./adapter.js";
 import { awaitWithDefault } from "./core/defaults.js";
-import type { WebAuthnPolicy } from "./core/webauthn.js";
-import { IntentRejectedError } from "./core/errors.js";
+import { credentialKeyMaterial, isWebAuthnCredential, type WebAuthnPolicy } from "./core/webauthn.js";
+import { CountersignError, IntentRejectedError } from "./core/errors.js";
 import { createIntent, type AgentIdentity } from "./core/intent.js";
-import { generateKeypair } from "./core/keys.js";
+import { generateKeypair, publicKeyFromSecret } from "./core/keys.js";
 import type { Countersignature, Intent, IntentFields, Resolution } from "./core/types.js";
 import type { ReceiptSink } from "./receipt-log.js";
 
@@ -74,10 +74,14 @@ export function wrapAction<A extends unknown[], R>(
   return async (...args: A): Promise<R> => {
     const agent = opts.agent ?? defaultAgent();
     const intent = createIntent(fields, agent);
+    const authority = opts.authorityKey ?? authorityKeyFromEnv();
+    // Fail fast on configurations that would otherwise be rejected only AFTER a human
+    // approves — a split-brain where the approver is told "approved" but the guarded
+    // action is silently blocked. Runs before anything is delivered.
+    assertDeliverable(intent, authority, opts.webauthn);
     opts.onIntent?.(intent);
 
     await adapter.deliver(intent);
-    const authority = opts.authorityKey ?? authorityKeyFromEnv();
     const resolution = await awaitWithDefault(intent, adapter.awaitResolution(intent), authority, opts.webauthn);
     const decisive = resolution.countersignatures[resolution.countersignatures.length - 1];
     opts.onResolution?.(resolution);
@@ -90,6 +94,36 @@ export function wrapAction<A extends unknown[], R>(
     if (resolution.decision !== "approve") throw new IntentRejectedError(resolution, intent);
     return await fn(...args);
   };
+}
+
+/**
+ * Reject, at wrap time, an Intent+config combination that `awaitWithDefault` would
+ * only reject AFTER delivery and human approval — turning a silent post-approval
+ * failure (the approver sees "approved", the action never runs) into an immediate,
+ * actionable error before anything is sent.
+ */
+function assertDeliverable(intent: Intent, authoritySecret: string, webauthn?: WebAuthnPolicy): void {
+  const authorityPub = publicKeyFromSecret(authoritySecret);
+  // Separation of duty: the authoring agent key must be distinct from the authority key.
+  if (intent.agent?.public_key === authorityPub)
+    throw new CountersignError(
+      "wrapAction: the agent key must be distinct from the authority key — verifyResolution would reject this Intent only after approval",
+    );
+  for (const a of intent.approvers) {
+    if (a.mode !== "keyed" || !a.public_key) continue;
+    // A keyed slot bound to the authority key degrades separation of duty (the
+    // authority-key holder could sign it): rejected post-approval, so refuse it now.
+    if (credentialKeyMaterial(a.public_key) === authorityPub)
+      throw new CountersignError(
+        `wrapAction: keyed approver ${a.actor} is bound to the authority key — a keyed slot must be the approver's own key`,
+      );
+    // A passkey receipt can only be verified with a WebAuthn policy; without one it
+    // would fail verification AFTER the approver signs (a false "approved").
+    if (isWebAuthnCredential(a.public_key) && !webauthn)
+      throw new CountersignError(
+        `wrapAction: approver ${a.actor} is a passkey but no \`webauthn\` policy was supplied — pass { webauthn: { rpId, allowedOrigins } } (the same policy the SigningServer uses)`,
+      );
+  }
 }
 
 async function postCallback(url: string, resolution: Resolution): Promise<void> {

@@ -180,6 +180,16 @@ describe("verifyAll()", () => {
     expect(r.faults.some((f) => f.actor === "local:a" && f.reason === "unverified-intent")).toBe(true);
   });
 
+  it("faults a keyed-approver receipt carrying a non-approver policy (audit matches verifyResolution)", async () => {
+    const i = intent(2); // keyed local:a / local:b
+    // Signed by local:a's OWN key but labeled policy "default" — verifyResolution rejects
+    // exactly this, so the audit must fault it too, not read it as valid.
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "default"));
+    const r = await log.verifyAll({ intents: [i] });
+    expect(r.ok).toBe(false);
+    expect(r.faults.some((f) => f.actor === "local:a" && f.reason === "untrusted-key")).toBe(true);
+  });
+
   it("with trustedAgentKeys, ignores an Intent signed by an unpinned agent", async () => {
     const i = intent(2);
     await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));

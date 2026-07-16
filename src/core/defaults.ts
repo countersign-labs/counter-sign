@@ -64,6 +64,11 @@ function mintDefault(intent: Intent, authoritySecret: string): Resolution {
  * without being able to throw on the honest timeout path.
  */
 export function defaultResolution(intent: Intent, authoritySecret: string): Resolution {
+  // Validate first (fail closed): a malformed created_at/timeout makes deadline() NaN,
+  // so the `Date.now() < deadline` guard is false and mintDefault would hit
+  // `new Date(NaN).toISOString()` → uncaught RangeError. External callers must get the
+  // documented CountersignError instead. (awaitWithDefault already validates up front.)
+  assertIntentInvariants(intent);
   if (Date.now() < deadline(intent))
     throw new CountersignError(`intent ${intent.intent_id} has not reached its deadline — the Default cannot fire early`);
   return mintDefault(intent, authoritySecret);

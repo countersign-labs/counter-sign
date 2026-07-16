@@ -65,6 +65,20 @@ interface PendingEntry {
   timer?: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * Guard for a VOUCHED-only adapter (chat buttons, email links): these can only
+ * relay a server-vouched decision, so a `keyed` approver's input can't reach the
+ * quorum — settle() would drop it and the Intent would fall to its Default with no
+ * usable veto channel. Such adapters MUST refuse a keyed Intent in deliver() and
+ * route keyed approvers through the SigningServer instead.
+ */
+export function assertVouchedApprovers(intent: Intent): void {
+  if (intent.approvers.some((a) => a.mode === "keyed"))
+    throw new CountersignError(
+      `this adapter cannot serve keyed approvers (they must sign their own receipt via the SigningServer / approve CLI); intent ${intent.intent_id} has a keyed approver`,
+    );
+}
+
 /** Book-keeping shared by all adapters: intents awaiting human decisions. */
 export class PendingDecisions {
   private entries = new Map<string, PendingEntry>();

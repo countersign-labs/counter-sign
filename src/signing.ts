@@ -30,6 +30,9 @@ export interface SigningServerConfig {
   baseUrl: string;
 }
 
+/** How stale a click-time signing timestamp may be at record (clock skew + latency). */
+const MAX_SIGNING_SKEW_MS = 5 * 60_000;
+
 interface SignToken {
   typ: "sign";
   intent_id: string;
@@ -142,18 +145,15 @@ export class SigningServer {
       res.writeHead(410, { "content-type": "text/html; charset=utf-8" }).end(page("This approval link is invalid, expired, or already decided.", ""));
       return;
     }
-    const { intent, approver } = found;
-    // A fixed timestamp for this session, so both challenges are stable across GET→POST.
-    const ts = new Date().toISOString();
-    const cred = approver.public_key!;
+    const { intent } = found;
+    // The challenge (and its timestamp) is minted at CLICK time via POST phase
+    // "challenge", so the receipt's timestamp reflects when the human decided —
+    // not when this page rendered (a page left open must not backdate the audit).
     const data = {
       summary: intent.summary,
       action: intent.action,
       rpId: this.cfg.webauthn.rpId,
-      timestamp: ts,
       quorum: quorumOf(intent),
-      challengeApprove: challengeFor(unsignedReceipt(intent.intent_id, "approve", approver.actor, cred, ts)),
-      challengeReject: challengeFor(unsignedReceipt(intent.intent_id, "reject", approver.actor, cred, ts)),
     };
     // Defense-in-depth CSP: only our nonce'd inline script may run; block objects,
     // base-uri, and framing. The scriptJson escaping is the primary XSS defense.
@@ -171,7 +171,7 @@ export class SigningServer {
     const json = (code: number, payload: unknown): void => {
       res.writeHead(code, { "content-type": "application/json" }).end(JSON.stringify(payload));
     };
-    let body: { token?: string; decision?: string; timestamp?: string; signature?: string; authenticator_data?: string; client_data_json?: string };
+    let body: { phase?: string; token?: string; decision?: string; timestamp?: string; signature?: string; authenticator_data?: string; client_data_json?: string };
     try {
       body = JSON.parse((await readBody(req)).toString("utf8"));
     } catch {
@@ -179,15 +179,31 @@ export class SigningServer {
     }
     const token = verifySigningToken(body.token ?? "", this.authorityPublicKey);
     if (!token || Date.now() >= token.exp) return json(410, { error: "invalid or expired token" });
-    // Single-use per (intent, actor): once this approver has recorded a decision,
-    // the link is dead — no replaying the assertion, no approving-then-vetoing.
+    if (body.decision !== "approve" && body.decision !== "reject") return json(400, { error: "bad decision" });
+
+    // Phase 1 (click): mint a fresh timestamp + challenge for THIS decision, so the
+    // audit timestamp is when the human pressed the button.
+    if (body.phase === "challenge") {
+      const found = this.resolveApprover(token);
+      if (!found) return json(410, { error: "no longer pending" });
+      const ts = new Date().toISOString();
+      const challenge = challengeFor(unsignedReceipt(token.intent_id, body.decision, found.approver.actor, found.approver.public_key!, ts));
+      return json(200, { timestamp: ts, challenge });
+    }
+
+    // Phase 2 (record): single-use per (intent, actor) — once recorded, the link is
+    // dead (no replay, no approve-then-veto from a second tab). Check BEFORE
+    // resolveApprover so a replay after the Intent resolved still reports "used".
     const useKey = `${token.intent_id}\n${normalizeActor(token.actor)}`;
     if (this.consumed.has(useKey)) return json(410, { error: "this approval link has already been used" });
-    if (body.decision !== "approve" && body.decision !== "reject") return json(400, { error: "bad decision" });
-    if (typeof body.timestamp !== "string" || typeof body.signature !== "string" || typeof body.authenticator_data !== "string" || typeof body.client_data_json !== "string")
-      return json(400, { error: "missing assertion fields" });
     const found = this.resolveApprover(token);
     if (!found) return json(410, { error: "no longer pending" });
+    if (typeof body.timestamp !== "string" || typeof body.signature !== "string" || typeof body.authenticator_data !== "string" || typeof body.client_data_json !== "string")
+      return json(400, { error: "missing assertion fields" });
+    // The timestamp was minted at click time; reject a stale one (a captured/old
+    // challenge). It is also assertion-bound, so it cannot be altered.
+    const ts = Date.parse(body.timestamp);
+    if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > MAX_SIGNING_SKEW_MS) return json(400, { error: "stale or invalid timestamp" });
 
     // Reconstruct the receipt the approver signed; record() re-verifies the
     // assertion against the bound credential + RP policy (the challenge binds
@@ -230,24 +246,28 @@ const bytesToB64url = b => btoa(String.fromCharCode(...new Uint8Array(b))).repla
 document.getElementById("summary").textContent = D.summary;
 document.getElementById("action").textContent = D.action + (D.quorum>1 ? "  ("+D.quorum+" approvals required)" : "");
 const status = document.getElementById("status");
-async function decide(decision, challenge){
+const post = (b) => fetch("/sign", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(b) });
+async function decide(decision){
   status.textContent = "Waiting for your passkey…";
   try {
+    // Mint a fresh challenge + timestamp at click time (accurate audit timestamp).
+    const ch = await (await post({ phase:"challenge", token, decision })).json();
+    if (!ch.challenge) { status.textContent = "Error: " + (ch.error||"could not start"); return; }
     const assertion = await navigator.credentials.get({ publicKey: {
-      challenge: b64urlToBytes(challenge), rpId: D.rpId, userVerification: "preferred", timeout: 120000,
+      challenge: b64urlToBytes(ch.challenge), rpId: D.rpId, userVerification: "preferred", timeout: 120000,
     }});
     const r = assertion.response;
-    const res = await fetch("/sign", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({
-      token, decision, timestamp: D.timestamp,
+    const res = await post({
+      token, decision, timestamp: ch.timestamp,
       authenticator_data: bytesToB64url(r.authenticatorData),
       client_data_json: bytesToB64url(r.clientDataJSON),
       signature: bytesToB64url(r.signature),
-    })});
+    });
     const out = await res.json();
     status.textContent = res.ok ? ("Recorded: " + (out.status==="resolved" ? out.decision.toUpperCase() : (out.collected+"/"+out.quorum+" — awaiting more"))) : ("Error: " + (out.error||res.status));
   } catch(e) { status.textContent = "Passkey error: " + (e && e.message || e); }
 }
-document.getElementById("approve").onclick = () => decide("approve", D.challengeApprove);
-document.getElementById("reject").onclick = () => decide("reject", D.challengeReject);
+document.getElementById("approve").onclick = () => decide("approve");
+document.getElementById("reject").onclick = () => decide("reject");
 </script></body>`;
 }

@@ -49,6 +49,17 @@ export function isWebAuthnCredential(s: unknown): s is string {
 }
 
 /**
+ * The underlying key MATERIAL of a keyed approver's public_key, so a raw ed25519
+ * key `K` and the descriptor `webauthn-ed25519:K` map to the SAME value (they are
+ * one key, usable by one holder). A P-256 descriptor stays distinct (its bytes
+ * differ). Used for distinctness and for the authority-key-as-approver check —
+ * both must see through the WebAuthn wrapper.
+ */
+export function credentialKeyMaterial(publicKey: string): string {
+  return publicKey.startsWith(ED25519_PREFIX) ? publicKey.slice(ED25519_PREFIX.length) : publicKey;
+}
+
+/**
  * True iff `s` is a WELL-FORMED passkey descriptor: a known prefix followed by a
  * key of the right length in CANONICAL base64url (re-encoding the decoded bytes
  * yields the same string), so two encodings of one credential can't masquerade

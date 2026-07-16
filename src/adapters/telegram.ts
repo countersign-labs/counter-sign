@@ -14,6 +14,7 @@ import {
   PendingDecisions,
   type Adapter,
   type SettleResult,
+  assertVouchedApprovers,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
 
@@ -65,6 +66,7 @@ export class TelegramAdapter implements Adapter {
   }
 
   async deliver(intent: Intent): Promise<void> {
+    assertVouchedApprovers(intent); // this adapter is vouched-only; keyed approvers use the SigningServer
     await this.api("sendMessage", {
       chat_id: this.cfg.chatId,
       text: formatIntent(intent),

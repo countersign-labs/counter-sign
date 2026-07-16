@@ -105,7 +105,13 @@ export class ApproverRegistry {
   }
 
   private append(typ: "enroll" | "revoke", actor: string, publicKey: string, orgSecret: string): EnrollmentRecord {
-    const prev = this.records.length ? chainHash(this.records[this.records.length - 1]) : null;
+    const orgPub = publicKeyFromSecret(orgSecret);
+    // A registry has ONE org root throughout (verifyChain requires it). Refuse to
+    // append under a different root, which would corrupt the chain unverifiably.
+    const last = this.records[this.records.length - 1];
+    if (last && last.org_public_key !== orgPub)
+      throw new CountersignError(`cannot append under a different org-root key than the existing registry`);
+    const prev = last ? chainHash(last) : null;
     const unsigned = {
       countersign: COUNTERSIGN_VERSION,
       typ,
@@ -113,7 +119,7 @@ export class ApproverRegistry {
       public_key: publicKey,
       issued_at: new Date().toISOString(),
       prev,
-      org_public_key: publicKeyFromSecret(orgSecret),
+      org_public_key: orgPub,
     };
     const signature = signContext(orgSecret, ENROLL_CONTEXT, canonicalize(unsigned));
     const rec: EnrollmentRecord = { ...unsigned, signature };

@@ -21,8 +21,11 @@ export {
 export {
   verifyWebAuthnAssertion,
   isWebAuthnCredential,
+  isValidCredentialDescriptor,
+  credentialKeyMaterial,
   type WebAuthnAssertion,
   type WebAuthnVerifyOptions,
+  type WebAuthnPolicy,
 } from "./webauthn.js";
 export { createIntent, verifyIntent, quorumOf, assertIntentInvariants, type AgentIdentity } from "./intent.js";
 export { signDecision, verifyCountersignature, normalizeActor, type VerifyOptions } from "./countersignature.js";

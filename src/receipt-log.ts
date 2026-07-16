@@ -7,6 +7,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { canonicalize } from "./core/canonical.js";
 import { normalizeActor, verifyCountersignature, type VerifyOptions } from "./core/countersignature.js";
+import { DEFAULT_TIMEOUT_ACTOR } from "./core/defaults.js";
 import { CountersignError } from "./core/errors.js";
 import { toB64url } from "./core/keys.js";
 import type { Countersignature, Intent, Resolution } from "./core/types.js";
@@ -288,13 +289,17 @@ export class ReceiptLog implements ReceiptSink {
         } else if (intent) {
           // (2) Bind the receipt to the Intent's approver — a KEYED receipt must be
           // signed by THAT actor's own bound key, not merely a globally-trusted key
-          // (else one trusted approver could forge another's receipt). A vouched or
-          // Default receipt must be authority-signed.
+          // (else one trusted approver could forge another's receipt). A vouched
+          // approver, or the canonical timeout Default, must be authority-signed. An
+          // explicit receipt from an actor NOT in the Intent is a fault outright.
           const approver = intent.approvers.find((a) => normalizeActor(a.actor) === normalizeActor(cs.actor));
+          const isTimeoutDefault = cs.policy === "default" && normalizeActor(cs.actor) === DEFAULT_TIMEOUT_ACTOR;
           if (approver?.mode === "keyed") {
             if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";
-          } else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) {
-            reason = "untrusted-key";
+          } else if (approver || isTimeoutDefault) {
+            if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) reason = "untrusted-key";
+          } else {
+            reason = "untrusted-key"; // actor is not an approver of this Intent
           }
         } else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) {
           // No Intents supplied → fall back to the global trusted-set check.

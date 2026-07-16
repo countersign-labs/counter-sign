@@ -13,6 +13,7 @@ import { signDecision } from "../src/core/countersignature.js";
 import { verifyResolution } from "../src/core/defaults.js";
 import { InvalidCountersignatureError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
+import { LocalAdapter } from "../src/adapters/local.js";
 import { fromB64url, generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
 import type { Approver, Intent, Resolution } from "../src/core/types.js";
 
@@ -52,6 +53,15 @@ describe("keyed quorum — positive", () => {
       signDecision(i, "approve", "m:bob", bob.secretKey, "approver"),
     ]);
     expect(() => verifyResolution(i, r, authPub)).not.toThrow();
+  });
+
+  it("a vouched-only adapter REFUSES a keyed intent (would otherwise auto-approve on timeout)", async () => {
+    // A quorum-1 keyed intent on a button/link adapter: the approver's input can't
+    // reach the quorum via settle(), so a default:approve would fire unopposed. The
+    // adapter must refuse it at deliver() instead.
+    const i = keyedIntent(1);
+    const local = new LocalAdapter(authority.secretKey);
+    await expect(local.deliver(i)).rejects.toThrow(/keyed approver/);
   });
 
   it("a single keyed approver's veto is a complete reject", () => {
@@ -133,6 +143,15 @@ describe("keyed quorum — negative (a compromised authority key cannot forge it
   it("rejects a keyed approver bound to the AUTHORITY key (would degrade separation of duty)", () => {
     const i = createIntent(
       { action: "a", summary: "s", risk_tier: "low", approvers: [{ actor: "m:alice", mode: "keyed", public_key: authPub }], quorum: 1, timeout: 60, default: "reject" },
+      agent,
+    );
+    const r = res("approve", [signDecision(i, "approve", "m:alice", authority.secretKey, "approver")]);
+    expect(() => verifyResolution(i, r, authPub)).toThrow(/authority key/);
+  });
+
+  it("rejects the authority key WRAPPED as a webauthn-ed25519 descriptor (sees through the wrapper)", () => {
+    const i = createIntent(
+      { action: "a", summary: "s", risk_tier: "low", approvers: [{ actor: "m:alice", mode: "keyed", public_key: `webauthn-ed25519:${authPub}` }], quorum: 1, timeout: 60, default: "reject" },
       agent,
     );
     const r = res("approve", [signDecision(i, "approve", "m:alice", authority.secretKey, "approver")]);

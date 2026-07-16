@@ -6,6 +6,7 @@ import { normalizeActor, signDecision, verifyCountersignature } from "./counters
 import { CountersignError, InvalidCountersignatureError } from "./errors.js";
 import { assertIntentInvariants, quorumOf, verifyIntent } from "./intent.js";
 import { publicKeyFromSecret } from "./keys.js";
+import { credentialKeyMaterial } from "./webauthn.js";
 import type { WebAuthnPolicy } from "./webauthn.js";
 import type { Approver, Intent, Resolution } from "./types.js";
 
@@ -157,8 +158,9 @@ export function verifyResolution(
           throw new InvalidCountersignatureError(`keyed approver ${cs.actor} for ${intent.intent_id} has no bound key`);
         // A keyed slot must belong to the approver, not the authority — binding the
         // authority key here would let the authority-key holder forge that slot,
-        // silently degrading separation of duty. Refuse it.
-        if (approver.public_key === expectedAuthorityPublicKey)
+        // silently degrading separation of duty. See through a WebAuthn wrapper:
+        // `webauthn-ed25519:<authority-key>` is still the authority key.
+        if (credentialKeyMaterial(approver.public_key) === expectedAuthorityPublicKey)
           throw new InvalidCountersignatureError(
             `keyed approver ${cs.actor} for ${intent.intent_id} is bound to the authority key — a keyed slot must be the approver's own key`,
           );

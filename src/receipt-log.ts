@@ -97,15 +97,17 @@ export interface VerifyAllOptions extends VerifyOptions {
    */
   trustedAgentKeys?: readonly string[];
   /**
-   * The runtime authority public key — THE anchor for every authority-signed receipt
+   * The runtime authority public key(s) — THE anchor for every authority-signed receipt
    * (vouched approvals and the timeout Default) and for the keyed-slot separation-of-duty
    * check, exactly as verifyResolution's expectedAuthorityPublicKey. Dedicated and
    * distinct from `trustedKeys` (a general allowlist that may legitimately hold approver
    * keys). Supply it to audit authority-signed receipts: WITHOUT it, a vouched/Default
    * receipt cannot be verified and faults as `missing-authority-key` (honest — not
-   * silently valid, not a tamper alarm). Must be a canonical ed25519 key.
+   * silently valid, not a tamper alarm). Pass an ARRAY to audit a log that spans an
+   * authority-key rotation (a receipt is accepted if signed by ANY listed key). Each must
+   * be canonical ed25519. Only meaningful WITH `intents` — supplying it alone throws.
    */
-  authorityKey?: string;
+  authorityKey?: string | readonly string[];
   /**
    * A chain head captured earlier (see `head()`). Anchoring it externally is
    * how you detect *tail truncation*: a forward chain alone cannot tell that
@@ -283,11 +285,19 @@ export class ReceiptLog implements ReceiptSink {
    * intact.
    */
   async verifyAll(opts: VerifyAllOptions = {}): Promise<ReceiptLogReport> {
-    // The authority key must be canonical, or a keyed slot bound to the canonical
-    // authority key slips past the exact-string SoD comparison via a non-canonical alias
-    // (base64url is not injective) — the same class already closed for the agent/org keys.
-    if (opts.authorityKey !== undefined && !isCanonicalPublicKey(opts.authorityKey))
-      throw new CountersignError("verifyAll: authorityKey is not a canonical ed25519 key");
+    // Normalize the authority key(s) to a canonical set. Each must be canonical, or a
+    // keyed slot bound to the canonical authority key slips past the exact-string SoD
+    // comparison via a non-canonical alias (base64url is not injective) — the class
+    // already closed for the agent/org keys. authorityKey only does anything with
+    // `intents` (the authority checks live in the per-Intent branch), so passing it alone
+    // would be a silent no-op — throw instead of misleading the auditor.
+    const authorityKeys = opts.authorityKey === undefined ? undefined : typeof opts.authorityKey === "string" ? [opts.authorityKey] : [...opts.authorityKey];
+    if (authorityKeys) {
+      if (!authorityKeys.every(isCanonicalPublicKey))
+        throw new CountersignError("verifyAll: authorityKey contains a non-canonical ed25519 key");
+      if (!opts.intents)
+        throw new CountersignError("verifyAll: authorityKey has no effect without `intents` (the authority checks are per-Intent) — omit it or supply intents");
+    }
     // An Intent's approver bindings are only a trust anchor if the Intent ITSELF
     // authenticates — otherwise a tampered archived Intent (approver key swapped,
     // signature now invalid) would let a fake receipt signed by the replacement key
@@ -308,7 +318,7 @@ export class ReceiptLog implements ReceiptSink {
             // Separation of duty (as verifyResolution enforces): an Intent authored BY the
             // authority key is not trusted for its bindings — else the authority-key holder
             // could bind approver keys it controls, sign the receipts, and pass the audit.
-            (opts.authorityKey === undefined || i.agent?.public_key !== opts.authorityKey) &&
+            (authorityKeys === undefined || !authorityKeys.includes(i.agent?.public_key)) &&
             (!opts.trustedAgentKeys || opts.trustedAgentKeys.includes(i.agent?.public_key));
         } catch {
           authentic = false;
@@ -365,31 +375,30 @@ export class ReceiptLog implements ReceiptSink {
           // may legitimately hold approver keys). To verify an authority-signed receipt
           // you MUST supply it; without it such a receipt faults as `missing-authority-key`
           // — honest (can't verify), never silently valid, never a tamper alarm.
-          const authorityKey = opts.authorityKey;
           if (approver && cs.policy !== "approver") {
             // A named approver's receipt is always an "approver" decision. A "default"
             // (or other) policy on it is the timeout-Default label smuggled onto a human
             // slot — verifyResolution rejects exactly this, so the audit must too.
             reason = "untrusted-key";
           } else if (approver?.mode === "keyed") {
-            // A keyed slot must NOT be bound to the authority key (a keyed decision must be
+            // A keyed slot must NOT be bound to ANY authority key (a keyed decision must be
             // the approver's OWN key), then verified against that own bound key.
-            if (authorityKey && approver.public_key && credentialKeyMaterial(approver.public_key) === authorityKey) reason = "untrusted-key";
+            if (authorityKeys && approver.public_key && authorityKeys.includes(credentialKeyMaterial(approver.public_key))) reason = "untrusted-key";
             else if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else if (isTimeoutDefault) {
             // The timeout Default, checked like verifyResolution's default branch: decision
             // matches the quorum-derived default, stamped at/after the deadline (not
-            // backdated), and authority-signed.
+            // backdated), and authority-signed (by any listed authority key).
             const expectedDefault = quorumOf(intent) > 1 ? "reject" : intent.default;
             if (cs.decision !== expectedDefault) reason = "untrusted-key";
             else if (!(Date.parse(cs.timestamp) >= deadline(intent))) reason = "untrusted-key";
-            else if (authorityKey === undefined) reason = "missing-authority-key";
-            else if (!verifyCountersignature(cs, { trustedKeys: authorityKey, webauthn: opts.webauthn })) reason = "untrusted-key";
+            else if (authorityKeys === undefined) reason = "missing-authority-key";
+            else if (!verifyCountersignature(cs, { trustedKeys: authorityKeys, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else if (approver) {
             // A vouched approver's receipt is authority-signed — verify it against the
-            // authority key (verifyResolution binds it to exactly that).
-            if (authorityKey === undefined) reason = "missing-authority-key";
-            else if (!verifyCountersignature(cs, { trustedKeys: authorityKey, webauthn: opts.webauthn })) reason = "untrusted-key";
+            // authority key(s) (verifyResolution binds it to exactly the authority key).
+            if (authorityKeys === undefined) reason = "missing-authority-key";
+            else if (!verifyCountersignature(cs, { trustedKeys: authorityKeys, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else {
             reason = "untrusted-key"; // actor is not an approver of this Intent
           }

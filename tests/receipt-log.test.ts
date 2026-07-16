@@ -164,6 +164,22 @@ describe("verifyAll()", () => {
     expect(r.faults).toEqual([{ index: 1, intent_id: stray.intent_id, actor: "local:a", reason: "unknown-intent" }]);
   });
 
+  it("accepts a vouched receipt signed by a ROTATED-OUT authority key (authorityKey as an array)", async () => {
+    const oldAuth = generateKeypair();
+    const i = intent(); // vouched local:a / local:b
+    await log.append(signDecision(i, "approve", "local:a", oldAuth.secretKey)); // signed by the OLD authority
+    // Auditing across a rotation: accept a receipt signed by ANY listed authority key.
+    const r = await log.verifyAll({ intents: [i], authorityKey: [authorityPub, oldAuth.publicKey] });
+    expect(r.ok).toBe(true);
+    // …but a key NOT in the set is still rejected.
+    const r2 = await log.verifyAll({ intents: [i], authorityKey: [authorityPub] });
+    expect(r2.ok).toBe(false);
+  });
+
+  it("throws if authorityKey is passed without intents (no silent no-op)", async () => {
+    await expect(log.verifyAll({ authorityKey: authorityPub })).rejects.toThrow(/without `intents`|no effect/);
+  });
+
   it("faults a vouched/Default receipt as missing-authority-key when authorityKey is omitted", async () => {
     // An authority-signed receipt cannot be verified without the authority key, so the
     // audit reports it honestly (not silently valid, not a tamper alarm).

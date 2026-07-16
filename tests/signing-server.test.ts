@@ -441,6 +441,27 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     expect(pending.has(i.intent_id)).toBe(false); // reclaimed
   });
 
+  it("under default:approve, a decision that SETTLES during delivery is honored despite a partial failure", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:a");
+    const b = passkeyApprover("m:b");
+    const i = createIntent({ action: "a", summary: "s", risk_tier: "low", approvers: [a.approver, b.approver], quorum: 1, timeout: 300, default: "approve" }, agent);
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    const adapter = new SigningLinkAdapter({
+      server: signer,
+      notify: async (l) => {
+        if (l.actor === "m:b") throw new Error("B down");
+        const token = new URL(l.url.replace(origin, base)).searchParams.get("token");
+        const ch = await getChallenge(base, token, "approve");
+        await record(base, token, "approve", ch, a.sign); // A approves DURING delivery
+      },
+    });
+    await expect(adapter.deliver(i)).resolves.toBeUndefined(); // NOT fail-closed — A's approval settled
+    expect((await adapter.awaitResolution(i)).decision).toBe("approve");
+  });
+
   it("SWALLOWS a partial delivery under default:reject (M<N can still proceed / times out to reject)", async () => {
     const pending = new PendingDecisions();
     const a = passkeyApprover("m:a");

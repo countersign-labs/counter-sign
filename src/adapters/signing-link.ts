@@ -73,7 +73,19 @@ export class SigningLinkAdapter implements Adapter {
     // pending entry to exist, so an approver who taps immediately must not race a
     // not-yet-registered Intent. awaitResolution() consumes this same promise.
     if (!this.waiting.has(intent.intent_id)) this.waiting.set(intent.intent_id, this.server.awaitResolution(intent));
-    for (const link of links) await this.notify(link);
+    try {
+      for (const link of links) await this.notify(link);
+    } catch (err) {
+      // Delivery failed: reclaim BOTH registrations so a failed deliver (which
+      // permits notify to reject) can't leak the Intent + its promise. Nobody is
+      // awaiting the wait on this path, so swallow the rejection cancel() raises
+      // (else an unhandled rejection), then rethrow the real delivery error.
+      const pending = this.waiting.get(intent.intent_id);
+      this.waiting.delete(intent.intent_id);
+      pending?.catch(() => {});
+      this.server.cancel(intent, err instanceof Error ? err : new Error(String(err)));
+      throw err;
+    }
   }
 
   awaitResolution(intent: Intent): Promise<Resolution> {

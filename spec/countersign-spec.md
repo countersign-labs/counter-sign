@@ -253,7 +253,11 @@ the Default fires.
   compromise of an authority key forges authority. If they were the same key, a
   holder could both mint an Intent binding approver keys it controls and sign
   every keyed slot — forging an entire quorum. `verifyResolution` therefore
-  rejects any resolution whose Intent was authored by the authority key.
+  rejects any resolution whose Intent was authored by the authority key. The
+  enrollment registry's **org-root key** MUST likewise be distinct from the
+  runtime authority key — otherwise an authority compromise could also forge
+  enrollment records anchoring the quorum to attacker-chosen keys —
+  and `assertApproversEnrolled` rejects the shared-key configuration.
 
 ## 6. Versioning
 

@@ -150,8 +150,8 @@ describe("chain integrity & revocation", () => {
     const i = keyedIntent([keyed("m:alice", alice)], 1);
     const truncated = ApproverRegistry.fromJSONL(reg.toJSONL().trim().split("\n")[0] + "\n");
     // Without the head the rollback slips through; with it, it fails closed.
-    expect(() => assertApproversEnrolled(i, truncated, orgPub)).not.toThrow();
-    expect(() => assertApproversEnrolled(i, truncated, orgPub, head)).toThrow(/anchored head|active enrollment/);
+    expect(() => assertApproversEnrolled(i, truncated, orgPub, authPub)).not.toThrow();
+    expect(() => assertApproversEnrolled(i, truncated, orgPub, authPub, head)).toThrow(/anchored head|active enrollment/);
   });
 
   it("round-trips through JSONL persistence", () => {
@@ -174,25 +174,36 @@ describe("assertApproversEnrolled (strict mode) + end-to-end", () => {
     // The cryptographic quorum verifies AND the identities are registry-anchored.
     const r = res([signDecision(i, "approve", "m:alice", alice.secretKey, "approver"), signDecision(i, "approve", "m:bob", bob.secretKey, "approver")]);
     expect(() => verifyResolution(i, r, authPub)).not.toThrow();
-    expect(() => assertApproversEnrolled(i, reg, orgPub)).not.toThrow();
+    expect(() => assertApproversEnrolled(i, reg, orgPub, authPub)).not.toThrow();
 
     // Revoke Bob → the same Intent's approvers are no longer all active.
     reg.revoke("m:bob", bob.publicKey, org.secretKey);
-    expect(() => assertApproversEnrolled(i, reg, orgPub)).toThrow(/not bound to an active enrollment/);
+    expect(() => assertApproversEnrolled(i, reg, orgPub, authPub)).toThrow(/not bound to an active enrollment/);
   });
 
   it("rejects a keyed approver whose bound key was never enrolled", () => {
     const reg = new ApproverRegistry();
     reg.enroll("m:alice", alice.publicKey, org.secretKey, { pop: createEnrollmentProof("m:alice", alice.secretKey) });
     const i = keyedIntent([keyed("m:alice", alice), keyed("m:bob", bob)], 2); // bob never enrolled
-    expect(() => assertApproversEnrolled(i, reg, orgPub)).toThrow(/m:bob/);
+    expect(() => assertApproversEnrolled(i, reg, orgPub, authPub)).toThrow(/m:bob/);
   });
 
   it("rejects when the registry chain does not verify under the trusted org key", () => {
     const reg = new ApproverRegistry();
     reg.enroll("m:alice", alice.publicKey, org.secretKey, { pop: createEnrollmentProof("m:alice", alice.secretKey) });
     const i = keyedIntent([keyed("m:alice", alice)], 1);
-    expect(() => assertApproversEnrolled(i, reg, generateKeypair().publicKey)).toThrow(/chain, org signature/);
+    expect(() => assertApproversEnrolled(i, reg, generateKeypair().publicKey, authPub)).toThrow(/chain, org signature/);
+  });
+
+  it("rejects when the org-root key IS the runtime authority key (separation of duty)", () => {
+    // The registry's whole point is an org root DISTINCT from the runtime authority.
+    // If a deployment configured them as one key, a compromised authority could also
+    // forge enrollments — so the check refuses that configuration outright.
+    const reg = new ApproverRegistry();
+    // Enroll under a registry whose org root == the authority key.
+    reg.enroll("m:alice", alice.publicKey, authority.secretKey, { pop: createEnrollmentProof("m:alice", alice.secretKey) });
+    const i = keyedIntent([keyed("m:alice", alice)], 1);
+    expect(() => assertApproversEnrolled(i, reg, authPub, authPub)).toThrow(/distinct from the runtime authority/);
   });
 });
 

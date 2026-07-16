@@ -233,6 +233,21 @@ export class PendingDecisions {
     entry.resolve(resolution);
   }
 
+  /**
+   * Cancel a single pending wait and reclaim it NOW — e.g. delivery to the
+   * approvers failed, so the Intent will never resolve and should not sit in the
+   * map until its deadline reaper fires. Rejects the wait promise (the caller
+   * that awaits it, if any, sees `err`) and clears the reaper. A no-op for an
+   * unknown/already-settled intent.
+   */
+  cancel(intentId: string, err: Error): void {
+    const entry = this.entries.get(intentId);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    this.entries.delete(intentId);
+    entry.reject(err);
+  }
+
   abortAll(err: Error): void {
     for (const entry of this.entries.values()) {
       clearTimeout(entry.timer);

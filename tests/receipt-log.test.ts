@@ -176,6 +176,31 @@ describe("verifyAll()", () => {
     expect((await log.verifyAll({ intents: [i], authorityKey: authorityPub })).ok).toBe(true);
   });
 
+  it("does NOT trust an Intent authored BY the audit authority key (agent == authority)", async () => {
+    // The authority-key holder authors an Intent (agent == authority), binds an approver
+    // key IT controls, and signs the receipt. verifyResolution rejects this (SoD); the
+    // audit must too — the Intent is untrusted, so its receipt faults as unverified-intent.
+    const attacker = generateKeypair();
+    const evil = createIntent(
+      { action: "a", summary: "s", risk_tier: "critical", approvers: [{ actor: "local:a", mode: "keyed", public_key: attacker.publicKey }], quorum: 1, timeout: 300, default: "reject" },
+      { id: "agent:evil", keypair: { publicKey: authorityPub, secretKey: authority } },
+    );
+    await log.append(signDecision(evil, "approve", "local:a", attacker.secretKey, "approver"));
+    const r = await log.verifyAll({ intents: [evil], authorityKey: authorityPub });
+    expect(r.ok).toBe(false);
+    expect(r.faults.some((f) => f.reason === "unverified-intent")).toBe(true);
+  });
+
+  it("classifies a MALFORMED passkey descriptor as invalid-signature, not missing-webauthn-policy", async () => {
+    const i = intent();
+    // A receipt whose public_key carries a WebAuthn prefix but corrupt (too-short) key bytes.
+    const bad = { ...signDecision(i, "approve", "local:a", authority), public_key: "webauthn-ed25519:AAAA" };
+    await log.append(bad);
+    const r = await log.verifyAll({ intents: [i] }); // no webauthn policy
+    expect(r.faults.some((f) => f.reason === "invalid-signature")).toBe(true);
+    expect(r.faults.some((f) => f.reason === "missing-webauthn-policy")).toBe(false);
+  });
+
   it("faults a FORGED vouched receipt when audited with authorityKey", async () => {
     // A vouched receipt is authority-signed; verifyResolution binds it to the authority
     // key, so the audit must reject one signed by a rogue key when authorityKey is given.

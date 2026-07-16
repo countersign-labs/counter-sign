@@ -74,6 +74,9 @@ export function wrapAction<A extends unknown[], R>(
   return async (...args: A): Promise<R> => {
     const agent = opts.agent ?? defaultAgent();
     const intent = createIntent(fields, agent);
+    // Observe every signed Intent as soon as it exists — before the pre-delivery checks,
+    // so an Intent that fails them is still surfaced to the observer.
+    opts.onIntent?.(intent);
     const authority = opts.authorityKey ?? authorityKeyFromEnv();
     // The adapter (e.g. SigningLinkAdapter) may carry the WebAuthn policy its signer
     // verifies against; verify with the SAME policy — otherwise the signer accepts an
@@ -84,7 +87,6 @@ export function wrapAction<A extends unknown[], R>(
     // approves — a split-brain where the approver is told "approved" but the guarded
     // action is silently blocked. Runs before anything is delivered.
     assertDeliverable(intent, authority, webauthn);
-    opts.onIntent?.(intent);
 
     await adapter.deliver(intent);
     const resolution = await awaitWithDefault(intent, adapter.awaitResolution(intent), authority, webauthn);

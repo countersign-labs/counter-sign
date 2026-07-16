@@ -34,12 +34,21 @@ try {
   die(`could not read/parse intent: ${(e as Error).message}`, 2);
 }
 
-// Never sign over a malformed or forged Intent.
-assertIntentInvariants(intent);
+// Never sign over a malformed or forged Intent. A structural violation exits cleanly.
+try {
+  assertIntentInvariants(intent);
+} catch (e) {
+  die(`invalid intent: ${(e as Error).message}`, 2);
+}
 if (!verifyIntent(intent)) die("intent signature does not verify — refusing to sign");
 
 // The actor must be a KEYED approver of this Intent whose bound key is the one we hold.
-const pub = publicKeyFromSecret(key!);
+let pub: string;
+try {
+  pub = publicKeyFromSecret(key!);
+} catch {
+  die("--key (or COUNTERSIGN_APPROVER_KEY) is not a valid ed25519 secret key", 2);
+}
 const approver = intent.approvers.find((a) => normalizeActor(a.actor) === normalizeActor(actor!));
 if (!approver) die(`actor ${actor} is not an approver of this intent`);
 if (approver.mode !== "keyed") die(`actor ${actor} is a '${approver.mode}' approver — only keyed approvers sign their own receipts`);

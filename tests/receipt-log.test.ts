@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Adapter } from "../src/adapter.js";
 import { normalizeActor, signDecision } from "../src/core/countersignature.js";
+import { deadline } from "../src/core/defaults.js";
 import { CountersignError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
 import { generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
@@ -170,9 +171,38 @@ describe("verifyAll()", () => {
       agent,
     );
     await log.append(signDecision(i, "approve", "local:a", authority, "approver"));
-    const r = await log.verifyAll({ intents: [i], trustedKeys: authorityPub });
+    // With the dedicated authorityKey supplied, the forged keyed slot is caught…
+    const r = await log.verifyAll({ intents: [i], authorityKey: authorityPub });
     expect(r.ok).toBe(false);
     expect(r.faults.some((f) => f.actor === "local:a" && f.reason === "untrusted-key")).toBe(true);
+  });
+
+  it("accepts a well-formed timeout Default but faults a wrong-decision or backdated one", async () => {
+    const i = intent(2); // quorum 2 → expected Default is reject
+    const atDeadline = new Date(deadline(i) + 1).toISOString();
+    // Well-formed: reject, stamped at/after the deadline, authority-signed.
+    await log.append(signDecision(i, "reject", "default:timeout", authority, "default", atDeadline));
+    expect((await log.verifyAll({ intents: [i], authorityKey: authorityPub })).ok).toBe(true);
+
+    // Wrong decision (approve on a quorum>1 Intent) → faults.
+    const log2 = new ReceiptLog(join(dir, "d2.jsonl"));
+    await log2.append(signDecision(i, "approve", "default:timeout", authority, "default", atDeadline));
+    expect((await log2.verifyAll({ intents: [i], authorityKey: authorityPub })).ok).toBe(false);
+
+    // Backdated before the deadline → faults.
+    const log3 = new ReceiptLog(join(dir, "d3.jsonl"));
+    await log3.append(signDecision(i, "reject", "default:timeout", authority, "default", new Date(deadline(i) - 60_000).toISOString()));
+    expect((await log3.verifyAll({ intents: [i], authorityKey: authorityPub })).ok).toBe(false);
+  });
+
+  it("does NOT mis-flag an honest keyed receipt when its own key is in trustedKeys", async () => {
+    // Regression: the keyed-slot==authority check must use the dedicated authorityKey,
+    // NOT the trustedKeys allowlist — which legitimately holds the approvers' own keys.
+    const i = intent(2); // keyed local:a / local:b, distinct keys
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
+    const r = await log.verifyAll({ intents: [i], trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] });
+    expect(r.faults).toEqual([]); // Alice's own key in trustedKeys must not fault her receipt
+    expect(r.ok).toBe(true);
   });
 
   it("does NOT trust a TAMPERED Intent's approver binding (fake receipt via a swapped key)", async () => {

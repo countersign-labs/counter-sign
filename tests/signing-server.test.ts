@@ -400,6 +400,93 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     await expect(deploy()).rejects.toThrow(/SAME policy|differs/);
   });
 
+  it("a single approver's channel failure does NOT abort a still-satisfiable M-of-N quorum", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:a");
+    const b = passkeyApprover("m:b");
+    const c = passkeyApprover("m:c");
+    const i = intentWith([a.approver, b.approver, c.approver], 2); // 2-of-3
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    const links = new Map<string, string>();
+    const adapter = new SigningLinkAdapter({
+      server: signer,
+      notify: (l) => {
+        if (l.actor === "m:c") throw new Error("C's channel is down");
+        links.set(l.actor, l.url);
+      },
+    });
+    await adapter.deliver(i); // must NOT throw — A and B can still meet quorum 2
+    const resolution = adapter.awaitResolution(i);
+    for (const [actor, url] of links) {
+      const sign = actor === "m:a" ? a.sign : b.sign;
+      const token = new URL(url.replace(origin, base)).searchParams.get("token");
+      const ch = await getChallenge(base, token, "approve");
+      await record(base, token, "approve", ch, sign);
+    }
+    expect((await resolution).decision).toBe("approve"); // C being unreachable didn't break it
+  });
+
+  it("fails closed only when NO approver could be reached", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:a");
+    const i = intentWith([a.approver], 1);
+    const { signer } = makeServer(pending);
+    const adapter = new SigningLinkAdapter({ server: signer, notify: () => { throw new Error("all channels down"); } });
+    await expect(adapter.deliver(i)).rejects.toThrow(/all channels down|delivery failed/);
+    expect(pending.has(i.intent_id)).toBe(false); // reclaimed
+  });
+
+  it("close() keeps an already-recorded decision and raises no unhandled rejection", async () => {
+    const rejections: unknown[] = [];
+    const onRej = (e: unknown) => rejections.push(e);
+    process.on("unhandledRejection", onRej);
+    try {
+      const pending = new PendingDecisions();
+      const a = passkeyApprover("m:ceo");
+      const i = intentWith([a.approver], 1);
+      const { server, signer } = makeServer(pending);
+      servers.push(server);
+      const base = await listen(server);
+      const adapter = new SigningLinkAdapter({
+        server: signer,
+        notify: async (l) => {
+          const token = new URL(l.url.replace(origin, base)).searchParams.get("token");
+          const ch = await getChallenge(base, token, "approve");
+          await record(base, token, "approve", ch, a.sign); // decision lands during deliver
+        },
+      });
+      await adapter.deliver(i);
+      adapter.close(); // shutdown AFTER the decision landed
+      expect((await adapter.awaitResolution(i)).decision).toBe("approve"); // not lost by close()
+      await new Promise((r) => setTimeout(r, 20));
+      expect(rejections).toEqual([]); // close()'s abort raised no unhandled rejection
+    } finally {
+      process.off("unhandledRejection", onRej);
+    }
+  });
+
+  it("close() while pending rejects the wait (fail closed, not a fresh never-resolving one)", async () => {
+    const rejections: unknown[] = [];
+    const onRej = (e: unknown) => rejections.push(e);
+    process.on("unhandledRejection", onRej);
+    try {
+      const pending = new PendingDecisions();
+      const a = passkeyApprover("m:ceo");
+      const i = intentWith([a.approver], 1);
+      const { signer } = makeServer(pending);
+      const adapter = new SigningLinkAdapter({ server: signer, notify: () => {} });
+      await adapter.deliver(i); // registered, no decision yet
+      adapter.close(); // abort the in-flight wait
+      await expect(adapter.awaitResolution(i)).rejects.toThrow(/closed|aborted/i);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRej);
+    }
+  });
+
   it("refuses to deliver a vouched approver (no key to sign a link with)", async () => {
     const pending = new PendingDecisions();
     const { signer } = makeServer(pending);

@@ -59,6 +59,7 @@ export class SigningLinkAdapter implements Adapter {
    * resolved) promise instead.
    */
   private readonly captured = new Map<string, Promise<Resolution>>();
+  private closed = false;
 
   constructor(cfg: SigningLinkAdapterConfig) {
     this.server = cfg.server;
@@ -86,37 +87,59 @@ export class SigningLinkAdapter implements Adapter {
     // the loop isn't lost when awaitResolution() runs after deliver() returns.
     const pending = this.server.awaitResolution(intent);
     this.captured.set(intent.intent_id, pending);
+    // Safety handler: if this wait is later rejected by a fail-closed cancel() or a
+    // concurrent close()/abort, don't let it surface as an unhandled rejection. The real
+    // consumer (awaitResolution → awaitWithDefault) still observes the same outcome.
+    pending.catch(() => {});
+
+    // BEST-EFFORT delivery. One approver's channel being down must NOT abort a quorum
+    // the OTHER approvers can still satisfy (any M-of-N with M < N, and every 1-of-N),
+    // and an approval already in flight must not be cancelled out from under itself.
+    // Send every link, counting successes.
+    let delivered = 0;
+    let firstError: unknown;
     for (const link of links) {
       try {
         await this.notify(link);
+        delivered += 1;
       } catch (err) {
-        // If a decision already landed during delivery, the Intent is resolved and the
-        // failed link is moot — keep `pending` for awaitResolution() and return normally
-        // rather than throwing away a real approval/veto.
-        if (!this.server.isPending(intent)) return;
-        // No decision yet, and this approver can't be reached, so the quorum can never
-        // complete: reclaim the wait (fail closed) and swallow the rejection cancel()
-        // raises here — nobody awaits `pending` on this path.
-        this.captured.delete(intent.intent_id);
-        pending.catch(() => {});
-        this.server.cancel(intent, err instanceof Error ? err : new Error(String(err)));
-        throw err;
+        firstError ??= err;
       }
+    }
+    // Fail closed ONLY when nothing could be delivered AND no decision has landed: no
+    // approver can ever decide, so don't wait out the timeout. Otherwise let the decision
+    // — or the timeout Default, which is `reject` for any quorum > 1 — resolve it. A
+    // partial delivery that can't reach quorum therefore fails SAFE (times out to
+    // reject), never fails open.
+    if (delivered === 0 && this.server.isPending(intent)) {
+      this.captured.delete(intent.intent_id);
+      const err = firstError instanceof Error ? firstError : new CountersignError(`delivery failed for every approver of intent ${intent.intent_id}`);
+      this.server.cancel(intent, err);
+      throw err;
     }
   }
 
   awaitResolution(intent: Intent): Promise<Resolution> {
-    // Return the promise deliver() captured (it survives a resolve+evict during the
-    // notify loop); fall back to a fresh idempotent wait if awaitResolution is called
-    // without a prior deliver().
-    const p = this.captured.get(intent.intent_id) ?? this.server.awaitResolution(intent);
+    // Return the promise deliver() captured — it survives a resolve+evict during the
+    // notify loop, and a reject from a concurrent close(). Only if there is none do we
+    // consider a fresh wait; after close() we refuse (a fresh wait would never resolve,
+    // and letting it fall to the timeout Default would be a fail-open on shutdown).
+    const p = this.captured.get(intent.intent_id);
     this.captured.delete(intent.intent_id);
-    return p;
+    if (p) return p;
+    if (this.closed) return Promise.reject(new CountersignError("signing-link adapter is closed"));
+    return this.server.awaitResolution(intent);
   }
 
-  /** Release in-flight waits on shutdown (matches the messaging adapters' close()). */
+  /**
+   * Release in-flight waits on shutdown (matches the messaging adapters' close()). Does
+   * NOT clear `captured`: a decision that already landed but hasn't been consumed by
+   * awaitResolution() must still be returnable. Each captured wait gets a catch so the
+   * abort below doesn't surface as an unhandled rejection.
+   */
   close(): void {
-    this.captured.clear();
+    this.closed = true;
+    for (const p of this.captured.values()) p.catch(() => {});
     this.server.close();
   }
 }

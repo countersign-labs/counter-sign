@@ -5,7 +5,7 @@
 import { normalizeActor, signDecision, verifyCountersignature } from "./countersignature.js";
 import { CountersignError, InvalidCountersignatureError } from "./errors.js";
 import { assertIntentInvariants, quorumOf, verifyIntent } from "./intent.js";
-import { publicKeyFromSecret } from "./keys.js";
+import { isCanonicalPublicKey, publicKeyFromSecret } from "./keys.js";
 import { credentialKeyMaterial } from "./webauthn.js";
 import type { WebAuthnPolicy } from "./webauthn.js";
 import type { Approver, Intent, Resolution } from "./types.js";
@@ -89,6 +89,26 @@ export function verifyResolution(
   assertIntentInvariants(intent);
   if (!verifyIntent(intent))
     throw new InvalidCountersignatureError(`intent ${intent.intent_id} does not carry a valid agent signature`);
+
+  // The expected authority key must be canonical, or the equality checks below
+  // (against the agent key and each keyed approver's key) could be bypassed by a
+  // non-canonical base64url alias that decodes to the same key — a verifier
+  // configured with such an alias would let a slot bound to the *canonical*
+  // authority key slip through. Approver/agent keys are already required canonical.
+  if (!isCanonicalPublicKey(expectedAuthorityPublicKey))
+    throw new InvalidCountersignatureError(`expected authority public key is not a canonical ed25519 key`);
+
+  // Separation of duty starts with the Intent's author: the agent key binds each
+  // approver's key into the signed Intent, so if it equals the authority key a
+  // holder of the authority secret could mint a fresh Intent binding approver keys
+  // it controls and then sign every keyed slot with them — forging a whole quorum.
+  // The spec requires the agent and authority keys be distinct; enforce it here,
+  // where both public keys are in hand. (For a vouched flow it likewise collapses
+  // the author/relayer separation.)
+  if (intent.agent?.public_key === expectedAuthorityPublicKey)
+    throw new InvalidCountersignatureError(
+      `intent ${intent.intent_id} was authored by the authority key — the agent and authority keys must be distinct`,
+    );
 
   const receipts = resolution?.countersignatures;
   if (!Array.isArray(receipts) || receipts.length === 0)

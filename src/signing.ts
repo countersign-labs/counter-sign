@@ -89,8 +89,14 @@ function scriptJson(obj: unknown): string {
 export class SigningServer {
   private readonly cfg: SigningServerConfig;
   private readonly authorityPublicKey: string;
-  /** normalized `intent_id\nactor` pairs already used to record a decision. */
-  private readonly consumed = new Set<string>();
+  /**
+   * normalized `intent_id\nactor` -> the link token's expiry (ms). One entry per
+   * approver who has recorded a decision, so the link is single-use. Entries are
+   * pruned once their token expires — a spent link past its deadline can't be
+   * replayed anyway (the token is rejected upstream), so keeping it only leaks
+   * memory on a long-running server.
+   */
+  private readonly consumed = new Map<string, number>();
 
   constructor(cfg: SigningServerConfig) {
     this.cfg = cfg;
@@ -154,6 +160,10 @@ export class SigningServer {
       action: intent.action,
       rpId: this.cfg.webauthn.rpId,
       quorum: quorumOf(intent),
+      // When the deployment requires User Verification, the browser must ASK for it
+      // ("required") — else an authenticator may return a UP-only assertion that the
+      // verifier then rejects, leaving the approver unable to record at all.
+      requireUserVerification: this.cfg.webauthn.requireUserVerification === true,
     };
     // Defense-in-depth CSP: only our nonce'd inline script may run; block objects,
     // base-uri, and framing. The scriptJson escaping is the primary XSS defense.
@@ -194,6 +204,8 @@ export class SigningServer {
     // Phase 2 (record): single-use per (intent, actor) — once recorded, the link is
     // dead (no replay, no approve-then-veto from a second tab). Check BEFORE
     // resolveApprover so a replay after the Intent resolved still reports "used".
+    // Prune expired entries first so the map can't grow without bound.
+    this.pruneConsumed(Date.now());
     const useKey = `${token.intent_id}\n${normalizeActor(token.actor)}`;
     if (this.consumed.has(useKey)) return json(410, { error: "this approval link has already been used" });
     const found = this.resolveApprover(token);
@@ -215,8 +227,14 @@ export class SigningServer {
     };
     const result = this.cfg.pending.record(receipt, this.cfg.webauthn);
     if (!result) return json(400, { error: "assertion did not verify or request not pending" });
-    this.consumed.add(useKey); // this approver's link is now spent
+    this.consumed.set(useKey, token.exp); // this approver's link is now spent (until its token expires)
     return json(200, { status: result.status, decision: result.status === "resolved" ? result.decision : undefined, collected: result.collected, quorum: result.quorum });
+  }
+
+  /** Drop spent-link entries whose token has already expired: an expired token is
+   *  rejected upstream (no replay is possible), so retaining it only leaks memory. */
+  private pruneConsumed(now: number): void {
+    for (const [key, exp] of this.consumed) if (now >= exp) this.consumed.delete(key);
   }
 }
 
@@ -254,7 +272,8 @@ async function decide(decision){
     const ch = await (await post({ phase:"challenge", token, decision })).json();
     if (!ch.challenge) { status.textContent = "Error: " + (ch.error||"could not start"); return; }
     const assertion = await navigator.credentials.get({ publicKey: {
-      challenge: b64urlToBytes(ch.challenge), rpId: D.rpId, userVerification: "preferred", timeout: 120000,
+      challenge: b64urlToBytes(ch.challenge), rpId: D.rpId,
+      userVerification: D.requireUserVerification ? "required" : "preferred", timeout: 120000,
     }});
     const r = assertion.response;
     const res = await post({

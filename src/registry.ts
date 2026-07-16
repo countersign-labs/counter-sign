@@ -12,8 +12,8 @@
 import { createHash } from "node:crypto";
 import { canonicalize } from "./core/canonical.js";
 import { normalizeActor } from "./core/countersignature.js";
-import { isCanonicalPublicKey, publicKeyFromSecret, signContext, verifyContext } from "./core/keys.js";
-import { isValidCredentialDescriptor } from "./core/webauthn.js";
+import { isCanonicalPublicKey, publicKeyFromSecret, signContext, toB64url, utf8, verifyContext } from "./core/keys.js";
+import { isValidCredentialDescriptor, isWebAuthnCredential, verifyWebAuthnAssertion, type WebAuthnAssertion, type WebAuthnPolicy } from "./core/webauthn.js";
 import { CountersignError } from "./core/errors.js";
 import { COUNTERSIGN_VERSION, type Intent } from "./core/types.js";
 
@@ -44,6 +44,29 @@ export function createEnrollmentProof(actor: string, approverSecret: string): st
 }
 function popMessage(actor: string, publicKey: string): string {
   return `${normalizeActor(actor)}\n${publicKey}`;
+}
+
+/**
+ * A passkey enrollee proves possession with a WebAuthn ceremony instead of a raw
+ * signature: a `webauthn.get` assertion whose challenge is THIS value — a digest
+ * binding the actor and the exact credential being enrolled, under the enrollment
+ * domain-separation context. The enrollee runs navigator.credentials.get with this
+ * challenge; `enroll` re-derives it and verifies the assertion against the bound
+ * credential + RP policy, so an intermediary cannot substitute a credential it
+ * controls for the actor.
+ */
+export function enrollmentChallenge(actor: string, publicKey: string): string {
+  return toB64url(createHash("sha256").update(utf8(`${ENROLL_POP_CONTEXT}\n${popMessage(actor, publicKey)}`)).digest());
+}
+
+/** A passkey enrollee's WebAuthn proof of possession for `enroll`. */
+export interface PasskeyEnrollmentProof {
+  /** the authenticator assertion (from navigator.credentials.get over enrollmentChallenge) */
+  assertion: WebAuthnAssertion;
+  /** base64url assertion signature */
+  signature: string;
+  /** RP policy the ceremony was scoped to (rpId + allowed origins) */
+  policy: WebAuthnPolicy;
 }
 
 /** sha256 hex of a full record (including its signature) — the chain link. */
@@ -78,19 +101,45 @@ export class ApproverRegistry {
   }
 
   /**
-   * Enroll an approver key, attested by the org-root key. A RAW ed25519 key
-   * REQUIRES a valid proof of possession (createEnrollmentProof). A passkey
-   * descriptor is accepted as-is (it originates from a WebAuthn registration
-   * ceremony that already proved possession). Fails closed on a malformed key,
-   * a missing/invalid PoP, or an already-active binding.
+   * Enroll an approver key, attested by the org-root key. EVERY key requires proof
+   * of possession before the org root attests it, so a compromised enrollment
+   * intermediary cannot substitute a credential it controls for the actor:
+   *  - a RAW ed25519 key needs `opts.pop` (createEnrollmentProof) — the approver's
+   *    own signature over their actor + key;
+   *  - a PASSKEY descriptor needs `opts.webauthnPop` — a WebAuthn assertion over
+   *    `enrollmentChallenge(actor, key)`, proving the authenticator holds the
+   *    credential, verified against the bound key + RP policy.
+   * Fails closed on a malformed key, a missing/invalid PoP, or an already-active
+   * binding.
    */
-  enroll(actor: string, publicKey: string, orgSecret: string, opts: { pop?: string } = {}): EnrollmentRecord {
+  enroll(
+    actor: string,
+    publicKey: string,
+    orgSecret: string,
+    opts: { pop?: string; webauthnPop?: PasskeyEnrollmentProof } = {},
+  ): EnrollmentRecord {
     const isRaw = isCanonicalPublicKey(publicKey);
     if (!isRaw && !isValidCredentialDescriptor(publicKey))
       throw new CountersignError(`cannot enroll ${actor}: malformed or non-canonical public_key`);
     if (isRaw) {
       if (!opts.pop || !verifyContext(publicKey, ENROLL_POP_CONTEXT, popMessage(actor, publicKey), opts.pop))
         throw new CountersignError(`cannot enroll ${actor}: missing or invalid proof of possession`);
+    } else if (isWebAuthnCredential(publicKey)) {
+      // A descriptor alone does NOT prove a registration ceremony happened — require
+      // a WebAuthn assertion over the actor/key-bound enrollment challenge, verified
+      // against the credential and the ceremony's RP policy.
+      const p = opts.webauthnPop;
+      if (
+        !p ||
+        !verifyWebAuthnAssertion(p.assertion, p.signature, {
+          credential: publicKey,
+          expectedChallenge: enrollmentChallenge(actor, publicKey),
+          rpId: p.policy.rpId,
+          allowedOrigins: p.policy.allowedOrigins,
+          requireUserVerification: p.policy.requireUserVerification,
+        })
+      )
+        throw new CountersignError(`cannot enroll ${actor}: missing or invalid WebAuthn proof of possession`);
     }
     if (this.isActive(actor, publicKey))
       throw new CountersignError(`${actor} is already enrolled with this key`);

@@ -10,6 +10,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { PendingDecisions } from "../src/adapter.js";
 import { createSigningToken, verifySigningToken, SigningServer } from "../src/signing.js";
+import { SigningLinkAdapter } from "../src/adapters/signing-link.js";
 import { createIntent } from "../src/core/intent.js";
 import { fromB64url, generateKeypair, publicKeyFromSecret, signBytes, toB64url, utf8 } from "../src/core/keys.js";
 import type { Approver, Intent } from "../src/core/types.js";
@@ -154,6 +155,22 @@ describe("SigningServer GET/POST", () => {
     expect(html).toMatch(/<script nonce="[^"]+">/);
   });
 
+  it("asks the browser for userVerification=required when the policy requires UV", async () => {
+    const pending = new PendingDecisions();
+    const { approver } = passkeyApprover("m:ceo");
+    const i = intentWith([approver]);
+    // A deployment that REQUIRES user verification.
+    const signer = new SigningServer({ pending, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin], requireUserVerification: true }, baseUrl: origin });
+    const server = createServer(signer.handler());
+    servers.push(server);
+    const base = await listen(server);
+    void signer.awaitResolution(i);
+    const html = await (await fetch(signer.signingUrl(i, "m:ceo").replace(origin, base))).text();
+    // The page data carries the flag, and the ceremony escalates to "required".
+    expect(html).toContain('"requireUserVerification":true');
+    expect(html).toContain('D.requireUserVerification ? "required" : "preferred"');
+  });
+
   it("GET with an invalid/expired token shows an error page (410)", async () => {
     const pending = new PendingDecisions();
     const { server } = makeServer(pending);
@@ -170,5 +187,42 @@ describe("SigningServer GET/POST", () => {
     const raw = generateKeypair();
     const i = intentWith([{ actor: "m:bot", mode: "keyed", public_key: raw.publicKey }]);
     expect(() => signer.signingUrl(i, "m:bot")).toThrow(/passkey/);
+  });
+});
+
+describe("SigningLinkAdapter — delivers keyed intents through the wrapAction path", () => {
+  it("sends each keyed approver a link and resolves the passkey quorum end-to-end", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const b = passkeyApprover("m:cto");
+    const i = intentWith([a.approver, b.approver], 2); // 2-of-2 keyed passkey
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+
+    const sent: { actor: string; url: string }[] = [];
+    const adapter = new SigningLinkAdapter({ server: signer, notify: (l) => void sent.push({ actor: l.actor, url: l.url }) });
+
+    await adapter.deliver(i); // registers the wait, then notifies each approver
+    const resolution = adapter.awaitResolution(i);
+    expect(sent.map((s) => s.actor).sort()).toEqual(["m:ceo", "m:cto"]);
+
+    // Each approver taps their own link and signs with their own passkey.
+    for (const { actor, url } of sent) {
+      const token = new URL(url.replace(origin, base)).searchParams.get("token");
+      const sign = actor === "m:ceo" ? a.sign : b.sign;
+      const ch = await getChallenge(base, token, "approve");
+      const post = await record(base, token, "approve", ch, sign);
+      expect(post.status).toBe(200);
+    }
+    expect((await resolution).decision).toBe("approve"); // quorum met by two OWN-key receipts
+  });
+
+  it("refuses to deliver a vouched approver (no key to sign a link with)", async () => {
+    const pending = new PendingDecisions();
+    const { signer } = makeServer(pending);
+    const i = createIntent({ action: "a", summary: "s", risk_tier: "low", approvers: [{ actor: "tg:1", mode: "vouched" }], timeout: 300, default: "reject" }, agent);
+    const adapter = new SigningLinkAdapter({ server: signer, notify: () => {} });
+    await expect(adapter.deliver(i)).rejects.toThrow(/keyed approvers only|vouched/);
   });
 });

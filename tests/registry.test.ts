@@ -4,17 +4,39 @@
 // trust anchor for keyed quorum — a bound key is only trusted if it is an ACTIVE
 // enrollment attested by an org-root key distinct from the runtime authority.
 
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ApproverRegistry, assertApproversEnrolled, createEnrollmentProof } from "../src/registry.js";
+import { ApproverRegistry, assertApproversEnrolled, createEnrollmentProof, enrollmentChallenge, type PasskeyEnrollmentProof } from "../src/registry.js";
 import { signDecision } from "../src/core/countersignature.js";
 import { verifyResolution } from "../src/core/defaults.js";
 import { createIntent } from "../src/core/intent.js";
-import { generateKeypair, publicKeyFromSecret } from "../src/core/keys.js";
+import { generateKeypair, publicKeyFromSecret, signBytes, toB64url, utf8 } from "../src/core/keys.js";
 import type { Approver, Intent, Resolution } from "../src/core/types.js";
+
+const RP_ID = "approve.countersignlabs.com";
+const ORIGIN = `https://${RP_ID}`;
+
+/** A real passkey (ed25519) credential + a WebAuthn proof of possession bound to `actor`. */
+function passkeyEnrollment(actor: string): { cred: string; proof: PasskeyEnrollmentProof } {
+  const kp = generateKeypair();
+  const cred = `webauthn-ed25519:${kp.publicKey}`;
+  const challenge = enrollmentChallenge(actor, cred);
+  const authData = Buffer.concat([createHash("sha256").update(utf8(RP_ID)).digest(), Buffer.from([0x05]), Buffer.from([0, 0, 0, 1])]);
+  const clientData = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge, origin: ORIGIN }), "utf8");
+  const signed = Buffer.concat([authData, createHash("sha256").update(clientData).digest()]);
+  return {
+    cred,
+    proof: {
+      assertion: { authenticator_data: toB64url(authData), client_data_json: toB64url(clientData) },
+      signature: signBytes(kp.secretKey, signed),
+      policy: { rpId: RP_ID, allowedOrigins: [ORIGIN] },
+    },
+  };
+}
 
 const agent = { id: "agent:test", keypair: generateKeypair() };
 const authority = generateKeypair();
@@ -41,10 +63,18 @@ describe("enrollment", () => {
     expect(reg.isActive("m:alice", alice.publicKey)).toBe(true);
   });
 
-  it("enrolls a passkey descriptor without a raw PoP (registration proved possession)", () => {
+  it("enrolls a passkey descriptor ONLY with a valid WebAuthn proof of possession", () => {
     const reg = new ApproverRegistry();
-    const cred = `webauthn-p256:${Buffer.alloc(65, 4).toString("base64url")}`;
-    reg.enroll("m:ceo", cred, org.secretKey);
+    const { cred, proof } = passkeyEnrollment("m:ceo");
+    // A descriptor ALONE is refused — it does not prove a registration ceremony,
+    // so a compromised intermediary can't have the org root attest a substituted key.
+    expect(() => reg.enroll("m:ceo", cred, org.secretKey)).toThrow(/WebAuthn proof of possession/);
+    // A genuine PoP for m:ceo cannot enroll a DIFFERENT actor — the challenge binds
+    // the actor, so re-targeting it fails.
+    expect(() => reg.enroll("m:cfo", cred, org.secretKey, { webauthnPop: proof })).toThrow(/WebAuthn proof of possession/);
+    // The genuine ceremony for the right actor works.
+    const rec = reg.enroll("m:ceo", cred, org.secretKey, { webauthnPop: proof });
+    expect(rec.typ).toBe("enroll");
     expect(reg.isActive("m:ceo", cred)).toBe(true);
   });
 

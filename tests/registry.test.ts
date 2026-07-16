@@ -14,7 +14,7 @@ import { ApproverRegistry, assertApproversEnrolled, createEnrollmentProof, enrol
 import { signDecision } from "../src/core/countersignature.js";
 import { verifyResolution } from "../src/core/defaults.js";
 import { createIntent } from "../src/core/intent.js";
-import { generateKeypair, publicKeyFromSecret, signBytes, toB64url, utf8 } from "../src/core/keys.js";
+import { fromB64url, generateKeypair, publicKeyFromSecret, signBytes, toB64url, utf8 } from "../src/core/keys.js";
 import type { Approver, Intent, Resolution } from "../src/core/types.js";
 
 const RP_ID = "approve.countersignlabs.com";
@@ -193,6 +193,18 @@ describe("assertApproversEnrolled (strict mode) + end-to-end", () => {
     reg.enroll("m:alice", alice.publicKey, org.secretKey, { pop: createEnrollmentProof("m:alice", alice.secretKey) });
     const i = keyedIntent([keyed("m:alice", alice)], 1);
     expect(() => assertApproversEnrolled(i, reg, generateKeypair().publicKey, authPub)).toThrow(/chain, org signature/);
+  });
+
+  it("rejects a non-canonical org-root public key (alias would dodge the authority-distinctness compare)", () => {
+    const reg = new ApproverRegistry();
+    reg.enroll("m:alice", alice.publicKey, org.secretKey, { pop: createEnrollmentProof("m:alice", alice.secretKey) });
+    const i = keyedIntent([keyed("m:alice", alice)], 1);
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const bytes = fromB64url(orgPub);
+    let alias = "";
+    for (const c of alphabet) { const cand = orgPub.slice(0, -1) + c; if (cand !== orgPub && fromB64url(cand).length === 32 && fromB64url(cand).equals(bytes)) { alias = cand; break; } }
+    expect(alias).not.toBe("");
+    expect(() => assertApproversEnrolled(i, reg, alias, authPub)).toThrow(/canonical/);
   });
 
   it("rejects when the org-root key IS the runtime authority key (separation of duty)", () => {

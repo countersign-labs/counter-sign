@@ -12,7 +12,7 @@ import { assertIntentInvariants, quorumOf, verifyIntent } from "./core/intent.js
 import { credentialKeyMaterial, isValidCredentialDescriptor, isWebAuthnCredential } from "./core/webauthn.js";
 import { CountersignError } from "./core/errors.js";
 import { isCanonicalPublicKey, toB64url } from "./core/keys.js";
-import type { Countersignature, Intent, Resolution } from "./core/types.js";
+import type { Approver, Countersignature, Intent, Resolution } from "./core/types.js";
 
 /**
  * A place decisions are durably remembered. counter-sign never persists on its
@@ -303,6 +303,11 @@ export class ReceiptLog implements ReceiptSink {
       if (!opts.intents)
         throw new CountersignError("verifyAll: authorityKey has no effect without `intents` (the authority checks are per-Intent) — omit it or supply intents");
     }
+    // Symmetric to the authorityKey empty-array guard: an empty trustedAgentKeys makes the pin
+    // `[].includes(agent)` always false, so EVERY supplied Intent is dropped and an honest,
+    // untampered log false-faults as `unverified-intent`. Reject it rather than misaudit.
+    if (opts.trustedAgentKeys && opts.trustedAgentKeys.length === 0)
+      throw new CountersignError("verifyAll: trustedAgentKeys must not be an empty array — omit it, or supply at least one agent key");
     // An Intent's approver bindings are only a trust anchor if the Intent ITSELF
     // authenticates — otherwise a tampered archived Intent (approver key swapped,
     // signature now invalid) would let a fake receipt signed by the replacement key
@@ -311,6 +316,10 @@ export class ReceiptLog implements ReceiptSink {
     // Intent that fails is dropped so its receipts fault as `unverified-intent`
     // rather than being checked against attacker-chosen bindings.
     let intentsById: Map<string, Intent> | undefined;
+    // Actor→approver lookup cached ONCE per authentic Intent (mirrors verifyResolution's byActor),
+    // so the per-receipt loop below is an O(1) get instead of re-scanning + re-normalizing the whole
+    // approver list for every receipt (O(N·M)). Reserved default:timeout is excluded, as there too.
+    const approversByIntent = new Map<string, Map<string, Approver>>();
     const unverifiedIntentIds = new Set<string>();
     if (opts.intents) {
       intentsById = new Map();
@@ -328,8 +337,15 @@ export class ReceiptLog implements ReceiptSink {
         } catch {
           authentic = false;
         }
-        if (authentic) intentsById.set(i.intent_id, i);
-        else if (typeof i?.intent_id === "string") unverifiedIntentIds.add(i.intent_id);
+        if (authentic) {
+          intentsById.set(i.intent_id, i);
+          const byActor = new Map<string, Approver>();
+          for (const a of i.approvers) {
+            const na = normalizeActor(a.actor);
+            if (na !== DEFAULT_TIMEOUT_ACTOR) byActor.set(na, a);
+          }
+          approversByIntent.set(i.intent_id, byActor);
+        } else if (typeof i?.intent_id === "string") unverifiedIntentIds.add(i.intent_id);
       }
     }
     const lines = await this.parseLines();
@@ -376,7 +392,7 @@ export class ReceiptLog implements ReceiptSink {
           // approver, or the canonical timeout Default, must be authority-signed. An
           // explicit receipt from an actor NOT in the Intent is a fault outright.
           const csActor = normalizeActor(cs.actor);
-          const approver = intent.approvers.find((a) => normalizeActor(a.actor) === csActor);
+          const approver = approversByIntent.get(intent.intent_id)?.get(csActor);
           const isTimeoutDefault = cs.policy === "default" && csActor === DEFAULT_TIMEOUT_ACTOR;
           // The authority key is THE anchor for every authority-signed receipt (vouched
           // approvals + the timeout Default) and for the keyed-slot separation-of-duty
@@ -393,16 +409,17 @@ export class ReceiptLog implements ReceiptSink {
           } else if (approver?.mode === "keyed") {
             // A keyed slot must NOT be bound to ANY authority key (a keyed decision must be
             // the approver's OWN key), then verified against that own bound key.
-            if (authorityKeys === undefined && opts.trustedKeys === undefined && opts.trustedAgentKeys === undefined) {
-              // BARE mode (no authorityKey, no trustedKeys, no trustedAgentKeys): there is NO anchor
-              // to check separation of duty against. The keyed-slot SoD check (approver-key ≠ authority)
-              // and the agent ≠ authority guard both need the authority key; a self-signed keyed receipt
-              // then proves only that SOME key the Intent named signed it, which the authority-key holder
-              // forges by authoring the Intent as its own agent and binding a key it controls. Fault
-              // honestly (like vouched/Default in bare mode), never silently pass ok=true. Any ONE anchor
-              // closes it: authorityKey (rejects agent==authority and keyed-slot==authority), trustedAgentKeys
-              // (a pure-authority-key holder can't sign the Intent as a pinned agent), or trustedKeys
-              // (constrains the approver key to an allowlist the attacker's forged key isn't in).
+            if (authorityKeys === undefined && opts.trustedKeys === undefined) {
+              // No keyed-slot SoD anchor: the check that a keyed slot is NOT bound to the authority
+              // key needs the authority key itself (or a trustedKeys allowlist, which excludes it —
+              // a slot bound to the authority key then faults as its key isn't allowlisted). Without
+              // either, a self-signed keyed receipt proves only that SOME key the Intent named signed
+              // it, so the authority-key holder can forge a quorum (bind + sign a key it controls) and
+              // an audit blind to the authority key can't tell. Fault honestly (like vouched/Default in
+              // bare mode); do not report ok. trustedAgentKeys is NOT sufficient here — it pins the
+              // agent dimension but cannot check keyed-slot ≠ authority (which verifyResolution enforces),
+              // so a keyed audit with trustedAgentKeys alone would diverge from enforcement. Supply
+              // authorityKey (or trustedKeys) — optionally WITH trustedAgentKeys to also pin the agent.
               reason = "missing-authority-key";
             } else if (authorityKeys && approver.public_key && authorityKeys.includes(credentialKeyMaterial(approver.public_key))) reason = "untrusted-key";
             else if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";

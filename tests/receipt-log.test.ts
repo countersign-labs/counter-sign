@@ -346,9 +346,34 @@ describe("verifyAll()", () => {
     // The Intent verifies under its own agent key, but we pin a DIFFERENT agent.
     const r = await log.verifyAll({ intents: [i], trustedAgentKeys: [generateKeypair().publicKey] });
     expect(r.faults.some((f) => f.reason === "unverified-intent")).toBe(true);
-    // Pinning the correct agent key trusts the binding again.
-    const ok = await log.verifyAll({ intents: [i], trustedAgentKeys: [agent.keypair.publicKey] });
+    // Pinning the correct agent key trusts the binding again. authorityKey is the keyed-slot SoD
+    // anchor (trustedAgentKeys pins the agent but cannot check keyed-slot ≠ authority on its own).
+    const ok = await log.verifyAll({ intents: [i], trustedAgentKeys: [agent.keypair.publicKey], authorityKey: authorityPub });
     expect(ok.ok).toBe(true);
+  });
+
+  it("throws on an EMPTY trustedAgentKeys array (would drop every Intent and false-fault an honest log)", async () => {
+    // Symmetric to the authorityKey empty-array guard: `[].includes(agent)` is always false, so an
+    // empty pin silently drops every supplied Intent and faults an untampered log as unverified-intent.
+    const i = intent(2);
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
+    await expect(log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedAgentKeys: [] })).rejects.toThrow(/trustedAgentKeys must not be an empty array|at least one agent/);
+  });
+
+  it("faults a keyed receipt audited with trustedAgentKeys ONLY — the keyed-slot SoD check needs authorityKey (or trustedKeys)", async () => {
+    // trustedAgentKeys pins the AGENT, but the keyed-slot ≠ authority separation-of-duty check needs
+    // the authority key (or a trustedKeys allowlist that excludes it). With neither, verifyAll cannot
+    // check keyed SoD and must fault missing-authority-key — matching verifyResolution, not silently
+    // report ok on a log whose keyed slot might be bound to the runtime authority key.
+    const i = intent(2); // keyed local:a / local:b, honest agent
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
+    const only = await log.verifyAll({ intents: [i], trustedAgentKeys: [agent.keypair.publicKey] });
+    expect(only.ok).toBe(false);
+    expect(only.faults.some((f) => f.reason === "missing-authority-key")).toBe(true);
+    // Adding the authority key (the keyed-slot SoD anchor) alongside the agent pin clears it.
+    expect((await log.verifyAll({ intents: [i], trustedAgentKeys: [agent.keypair.publicKey], authorityKey: authorityPub })).ok).toBe(true);
+    // …and trustedKeys is the other valid keyed anchor (it would fault a slot bound to the authority key).
+    expect((await log.verifyAll({ intents: [i], trustedAgentKeys: [agent.keypair.publicKey], trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] })).ok).toBe(true);
   });
 
   it("faults a keyed receipt in BARE mode (no authorityKey / no trustedKeys) — the authority-key holder cannot forge a keyed quorum", async () => {

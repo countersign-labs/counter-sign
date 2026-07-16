@@ -91,7 +91,15 @@ export class ApproverRegistry {
     reg.records = text
       .split("\n")
       .filter((l) => l.trim().length > 0)
-      .map((l) => JSON.parse(l) as EnrollmentRecord);
+      .map((l) => {
+        // Fail closed on a non-object line ("null", "123", "[]", …): otherwise it
+        // becomes a record and verifyChain/activeKeys dereference it, throwing an
+        // uncaught TypeError instead of a clean rejection (mirrors ReceiptLog's guard).
+        const rec: unknown = JSON.parse(l);
+        if (!rec || typeof rec !== "object" || Array.isArray(rec))
+          throw new CountersignError("malformed registry line: each record must be a JSON object");
+        return rec as EnrollmentRecord;
+      });
     return reg;
   }
   toJSONL(): string {

@@ -9,6 +9,7 @@ import { canonicalize } from "./core/canonical.js";
 import { normalizeActor, verifyCountersignature, type VerifyOptions } from "./core/countersignature.js";
 import { DEFAULT_TIMEOUT_ACTOR } from "./core/defaults.js";
 import { assertIntentInvariants, verifyIntent } from "./core/intent.js";
+import { isWebAuthnCredential } from "./core/webauthn.js";
 import { CountersignError } from "./core/errors.js";
 import { toB64url } from "./core/keys.js";
 import type { Countersignature, Intent, Resolution } from "./core/types.js";
@@ -67,7 +68,7 @@ export interface ReceiptFault {
   index: number;
   intent_id: string;
   actor: string;
-  reason: "invalid-signature" | "untrusted-key" | "unknown-intent" | "unverified-intent" | "malformed";
+  reason: "invalid-signature" | "untrusted-key" | "unknown-intent" | "unverified-intent" | "missing-webauthn-policy" | "malformed";
 }
 
 /** The result of re-verifying an entire ReceiptLog. */
@@ -311,7 +312,11 @@ export class ReceiptLog implements ReceiptSink {
       let reason: ReceiptFault["reason"] | undefined;
       // (1) Integrity: the receipt verifies under its own embedded key (or, for a
       // passkey receipt, the WebAuthn assertion — needs the RP policy or it fails closed).
-      if (!verifyCountersignature(cs, { webauthn: opts.webauthn })) reason = "invalid-signature";
+      // A passkey receipt with no policy supplied CANNOT be verified — report that
+      // distinctly rather than as `invalid-signature`, so an audit that simply forgot
+      // to pass `webauthn` doesn't read as a tamper alarm on untampered receipts.
+      if (isWebAuthnCredential(cs.public_key) && !opts.webauthn) reason = "missing-webauthn-policy";
+      else if (!verifyCountersignature(cs, { webauthn: opts.webauthn })) reason = "invalid-signature";
       else {
         const intent = intentsById?.get(cs.intent_id);
         if (intentsById && !intent) {
@@ -326,7 +331,12 @@ export class ReceiptLog implements ReceiptSink {
           // explicit receipt from an actor NOT in the Intent is a fault outright.
           const approver = intent.approvers.find((a) => normalizeActor(a.actor) === normalizeActor(cs.actor));
           const isTimeoutDefault = cs.policy === "default" && normalizeActor(cs.actor) === DEFAULT_TIMEOUT_ACTOR;
-          if (approver?.mode === "keyed") {
+          if (approver && cs.policy !== "approver") {
+            // A named approver's receipt is always an "approver" decision. A "default"
+            // (or other) policy on it is the timeout-Default label smuggled onto a human
+            // slot — verifyResolution rejects exactly this, so the audit must too.
+            reason = "untrusted-key";
+          } else if (approver?.mode === "keyed") {
             if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else if (approver || isTimeoutDefault) {
             if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) reason = "untrusted-key";

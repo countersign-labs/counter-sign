@@ -142,8 +142,13 @@ describe("passkey receipts verify through the keyed choke point", () => {
     const log = new ReceiptLog(join(mkdtempSync(join(tmpdir(), "cs-pk-log-")), "r.jsonl"));
     await log.append(receipt);
     expect((await log.verifyAll({ webauthn: policy })).ok).toBe(true);
-    // Without the policy, a passkey receipt cannot be verified → flagged, not silently valid.
-    expect((await log.verifyAll()).faults.some((f) => f.reason === "invalid-signature")).toBe(true);
+    // Without the policy, a passkey receipt cannot be verified → flagged, not silently
+    // valid. But it is NOT tampered, so it faults distinctly as `missing-webauthn-policy`,
+    // not `invalid-signature` — a forgotten policy must not read as a tamper alarm.
+    const noPolicy = await log.verifyAll();
+    expect(noPolicy.ok).toBe(false);
+    expect(noPolicy.faults.some((f) => f.reason === "missing-webauthn-policy")).toBe(true);
+    expect(noPolicy.faults.some((f) => f.reason === "invalid-signature")).toBe(false);
   });
 
   it("HEADLINE holds: the authority key cannot forge a passkey slot", async () => {

@@ -157,4 +157,11 @@ describe("resolution validation at the race boundary", () => {
     expect(verifyCountersignature(r.countersignatures[0])).toBe(true);
     expect(r.countersignatures[0].intent_id).toBe(intent.intent_id);
   });
+
+  it("defaultResolution fails closed (CountersignError, not RangeError) on a malformed Intent", () => {
+    const bad = { ...intentWith(5, "reject"), created_at: "not-a-date" } as Intent;
+    // A NaN deadline used to slip past the early-guard and hit new Date(NaN).toISOString()
+    // → uncaught RangeError. It must now be rejected with the documented invariant error.
+    expect(() => defaultResolution(bad, authority)).toThrow(/ISO 8601|created_at/);
+  });
 });

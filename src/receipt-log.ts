@@ -313,6 +313,11 @@ export class ReceiptLog implements ReceiptSink {
     // the auditor asked for never runs and the log gets an integrity-only pass. Throw instead.
     if (opts.trustedAgentKeys && !opts.intents)
       throw new CountersignError("verifyAll: trustedAgentKeys has no effect without `intents` (the agent pin is per-Intent) — omit it or supply intents");
+    // Symmetric to the authorityKey / trustedAgentKeys empty-array guards: an empty trustedKeys makes
+    // the membership check (`[].includes(...)`) always false, so EVERY receipt faults `untrusted-key`
+    // on an honest log. Reject it with a clear error instead of a misleading all-untrusted tamper alarm.
+    if (opts.trustedKeys !== undefined && typeof opts.trustedKeys !== "string" && opts.trustedKeys.length === 0)
+      throw new CountersignError("verifyAll: trustedKeys must not be an empty array — omit it, or supply at least one key");
     // An Intent's approver bindings are only a trust anchor if the Intent ITSELF
     // authenticates — otherwise a tampered archived Intent (approver key swapped,
     // signature now invalid) would let a fake receipt signed by the replacement key
@@ -441,15 +446,18 @@ export class ReceiptLog implements ReceiptSink {
           } else {
             reason = "untrusted-key"; // actor is not an approver of this Intent
           }
-          // `trustedKeys` is an ADDITIONAL allowlist for KEYED (approver-signed) receipts ONLY:
-          // one that passed its per-key check must ALSO be signed by a key the auditor trusts, so a
-          // keyed receipt whose approver key is not in trustedKeys is still faulted — the auditor's
-          // trust policy is honored, not silently dropped once the Intent authenticates. It must NOT
-          // gate authority-signed vouched approvals or the timeout Default: those are anchored by the
-          // dedicated authorityKey, and trustedKeys legitimately holds only approver keys — gating
-          // them here would false-fault every honest vouched/Default receipt on an untampered log.
-          if (reason === undefined && approver?.mode === "keyed" && opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn }))
-            reason = "untrusted-key";
+          // `trustedKeys` is an ADDITIONAL allowlist for KEYED (approver-signed) receipts ONLY: one
+          // that passed its per-key check (its signature already verified above) must ALSO be a key the
+          // auditor trusts. Compare by credentialKeyMaterial — consistent with the keyed-slot==authority
+          // check — so a passkey descriptor `webauthn-ed25519:K` and its raw form `K` are ONE identity;
+          // a literal-descriptor match would false-fault an auditor who listed the other equivalent form.
+          // It must NOT gate authority-signed vouched approvals or the timeout Default (those are anchored
+          // by the dedicated authorityKey; trustedKeys legitimately holds only approver keys).
+          if (reason === undefined && approver?.mode === "keyed" && opts.trustedKeys !== undefined) {
+            const trusted = typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys;
+            const material = credentialKeyMaterial(cs.public_key);
+            if (!trusted.some((k) => credentialKeyMaterial(k) === material)) reason = "untrusted-key";
+          }
         } else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) {
           // No Intents supplied → fall back to the global trusted-set check.
           reason = "untrusted-key";

@@ -108,6 +108,12 @@ export class SigningServer {
     return this.cfg.pending.wait(intent);
   }
 
+  /** Cancel a pending signing wait (e.g. delivery of the links failed) and reclaim
+   *  it immediately instead of leaving it for the deadline reaper. */
+  cancel(intent: Intent, err: Error): void {
+    this.cfg.pending.cancel(intent.intent_id, err);
+  }
+
   /** A per-approver deep-link to the signing page for `actor` (must be a keyed approver). */
   signingUrl(intent: Intent, actor: string): string {
     const approver = intent.approvers.find((a) => normalizeActor(a.actor) === normalizeActor(actor));

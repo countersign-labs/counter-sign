@@ -227,6 +227,18 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     await expect(adapter.deliver(i)).rejects.toThrow(/keyed approvers only|vouched/);
   });
 
+  it("reclaims the pending wait when notify fails (a failed delivery must not leak)", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const i = intentWith([a.approver], 1);
+    const { signer } = makeServer(pending);
+    const adapter = new SigningLinkAdapter({ server: signer, notify: () => { throw new Error("delivery boom"); } });
+    await expect(adapter.deliver(i)).rejects.toThrow(/delivery boom/);
+    // No pending entry (or dangling promise) is left behind after the failure.
+    expect(pending.size).toBe(0);
+    expect(pending.has(i.intent_id)).toBe(false);
+  });
+
   it("wrapAction runs a keyed 2-of-2 passkey action end-to-end through the adapter", async () => {
     // The exact surface the review flagged as impossible: a multi-approver keyed
     // Intent driven through the normal wrapAction path, resolving to run the action.

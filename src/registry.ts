@@ -232,6 +232,13 @@ export class ApproverRegistry {
  * verifies under `orgPublicKey`. Throws CountersignError on any mismatch. Compose
  * this before acting on a resolution to require registry-anchored identities.
  *
+ * `expectedAuthorityPublicKey` is REQUIRED so this can enforce the Phase 3 trust
+ * model's cornerstone: the org-root key MUST be distinct from the runtime
+ * authority key. If they were the same key, a compromise of the runtime authority
+ * would also let the attacker mint valid enrollment/revocation records for
+ * approver keys it controls — anchoring the quorum to keys the authority itself
+ * chose, which defeats the whole registry. Reject that configuration up front.
+ *
  * Pass `expectedHead` (an externally-anchored `registry.head()`) to also detect
  * tail truncation / rollback — WITHOUT it a dropped `revoke` record can resurrect
  * a revoked key, so a deployment that revokes keys MUST anchor the head.
@@ -240,8 +247,15 @@ export function assertApproversEnrolled(
   intent: Intent,
   registry: ApproverRegistry,
   orgPublicKey: string,
+  expectedAuthorityPublicKey: string,
   expectedHead?: RegistryHead,
 ): void {
+  if (!isCanonicalPublicKey(expectedAuthorityPublicKey))
+    throw new CountersignError("expected authority public key is not a canonical ed25519 key");
+  if (orgPublicKey === expectedAuthorityPublicKey)
+    throw new CountersignError(
+      "the approver registry's org-root key must be distinct from the runtime authority key — sharing them collapses the separation of duty the registry provides",
+    );
   if (!registry.verifyChain(orgPublicKey, expectedHead))
     throw new CountersignError("approver registry chain, org signature, or anchored head does not verify");
   for (const a of intent.approvers) {

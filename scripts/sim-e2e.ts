@@ -28,10 +28,13 @@ import { SigningServer } from "../src/signing.js";
 import { SigningLinkAdapter } from "../src/adapters/signing-link.js";
 import { wrapAction } from "../src/shim.js";
 import { ReceiptLog } from "../src/receipt-log.js";
+import { IntentRejectedError } from "../src/core/errors.js";
 import { generateKeypair, publicKeyFromSecret, toB64url } from "../src/core/keys.js";
 import type { Intent } from "../src/core/types.js";
 
 const resultPath = process.argv[2] ?? "/tmp/cs-sim-e2e-result.json";
+// argv[3]: review-window seconds (default 300). Short values drive the TIMEOUT → Default scenario.
+const timeoutSeconds = Number(process.argv[3] ?? 300);
 
 /** A fresh P-256 WebAuthn credential + its PKCS8 key for the virtual authenticator. */
 function passkey(actor: string) {
@@ -84,7 +87,7 @@ server.listen(0, "127.0.0.1", () => {
         { actor: cto.actor, mode: "keyed", public_key: cto.credential },
       ],
       quorum: 2,
-      timeout: 300,
+      timeout: timeoutSeconds,
       default: "reject",
     },
     adapter,
@@ -111,7 +114,27 @@ server.listen(0, "127.0.0.1", () => {
       server.close();
       process.exit(audit.ok && actionRan ? 0 : 3);
     },
-    (err) => {
+    async (err) => {
+      // A veto or timeout-Default is the EXPECTED outcome for those scenarios: wrapAction records
+      // the rejecting resolution to the ReceiptLog BEFORE throwing IntentRejectedError, so the
+      // audit leg still applies — the blocked action is part of the history, not an absence.
+      if (err instanceof IntentRejectedError) {
+        const audit = await log.verifyAll({ intents: [captured!], authorityKey: publicKeyFromSecret(authority.secretKey), webauthn: policy });
+        const out = {
+          ok: false,
+          rejected: true,
+          decision: err.resolution.decision,
+          policy: err.resolution.policy,
+          decisiveActor: err.countersignature?.actor,
+          actionRan,
+          audit: { ok: audit.ok, total: audit.total, valid: audit.valid, chainIntact: audit.chain.intact, faults: audit.faults },
+        };
+        writeFileSync(resultPath, JSON.stringify(out));
+        process.stdout.write("SIM_E2E_DONE " + JSON.stringify(out) + "\n");
+        server.close();
+        // Exit 0 when the rejection is CLEAN: action blocked AND the recorded veto/Default audits ok.
+        process.exit(!actionRan && audit.ok ? 0 : 3);
+      }
       const out = { ok: false, actionRan, error: String(err) };
       writeFileSync(resultPath, JSON.stringify(out));
       process.stdout.write("SIM_E2E_DONE " + JSON.stringify(out) + "\n");

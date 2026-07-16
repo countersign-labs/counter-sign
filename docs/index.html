@@ -181,6 +181,14 @@
   .col p b{color:var(--ink);}
   .col p + p{margin-top:10px;}
 
+  /* sponsor lockup */
+  .sponsor{display:inline-flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dimmer);text-decoration:none;}
+  .sponsor:hover{color:var(--dim);}
+  .sponsor:hover .sponsor-logo{opacity:1;}
+  .sponsor-logo{height:16px;width:auto;opacity:.72;transition:opacity .15s ease;}
+  .card .sponsor{margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft);display:flex;}
+  .card .sponsor-logo{height:18px;}
+
   /* closer */
   .closer{padding:112px 0 40px;border-bottom:none;}
   .closer .big{font-family:var(--display);font-weight:600;font-size:clamp(25px,3.8vw,38px);line-height:1.25;max-width:22ch;}
@@ -451,6 +459,10 @@
         <div class="t">Stewardship</div>
         <div class="v">Authored, sponsored</div>
         <div class="d">Spec author <b>Haridarman Kumaresan</b>; sponsored by Agentsstack Pte. Ltd. Anyone can implement the protocol; CLAIRE is the first reference deployment.</div>
+        <a class="sponsor" href="https://agentsstack.com" target="_blank" rel="noopener">
+          Sponsored by
+          <img class="sponsor-logo" src="agentsstack.svg" alt="Agentsstack">
+        </a>
       </div>
     </div>
   </section>
@@ -471,7 +483,11 @@
       <a href="https://github.com/countersign-labs/counter-sign/blob/main/CHANGELOG.md">Changelog ↗</a>
       <a href="https://github.com/countersign-labs/counter-sign/security/policy">Security ↗</a>
     </div>
-    <div class="fine">counter-sign · draft 0.1.2 · spec author Haridarman Kumaresan · sponsored by Agentsstack Pte. Ltd.<br>Code Apache-2.0 · Spec text CC BY 4.0.</div>
+    <div class="fine">counter-sign · draft 0.1.2 · spec author Haridarman Kumaresan · Code Apache-2.0 · Spec text CC BY 4.0.</div>
+    <a class="sponsor" href="https://agentsstack.com" target="_blank" rel="noopener" style="margin-top:18px;">
+      Sponsored by
+      <img class="sponsor-logo" src="agentsstack.svg" alt="Agentsstack">
+    </a>
   </div>
 </footer>
 

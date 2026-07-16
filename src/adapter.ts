@@ -7,9 +7,9 @@ import { CountersignError } from "./core/errors.js";
 import { normalizeActor, signDecision, verifyCountersignature } from "./core/countersignature.js";
 import { deadline, DEFAULT_TIMEOUT_ACTOR } from "./core/defaults.js";
 import { quorumOf } from "./core/intent.js";
-import { generateKeypair } from "./core/keys.js";
+import { fromB64url, generateKeypair, verifyContext } from "./core/keys.js";
 import type { WebAuthnPolicy } from "./core/webauthn.js";
-import type { Approver, Countersignature, Decision, Intent, Resolution } from "./core/types.js";
+import { LINK_CONTEXT, type Approver, type Countersignature, type Decision, type Intent, type Resolution } from "./core/types.js";
 
 /**
  * The single interface every counter-sign adapter implements. Adapters are
@@ -329,6 +329,33 @@ export function parseDecisionPayload(payload: string): { intentId: string; decis
 
 export function decisionPayload(intent: Intent, decision: Decision): string {
   return `cs:${intent.intent_id}:${decision}`;
+}
+
+/**
+ * Drop `key -> expiry(ms)` entries whose expiry has passed. The ONE prune for every
+ * single-use bearer-link bookkeeping map (SigningServer's spent-links, EmailAdapter's
+ * decided-intents) — keep one copy so a replay-window fix can't land in only one.
+ */
+export function pruneExpired(map: Map<string, number>, now: number): void {
+  for (const [k, exp] of map) if (now >= exp) map.delete(k);
+}
+
+/**
+ * Verify a signed single-use bearer token of the form `b64url(bodyJSON).signature` under
+ * LINK_CONTEXT, returning the parsed body (caller applies its own shape check) or null on ANY
+ * failure — bad shape, bad signature, non-JSON. The ONE decode+verify mechanism for every
+ * link/signing token, so a hardening fix (length cap, constant-time compare) is applied once.
+ */
+export function verifyBearerToken(token: string, authorityPublicKey: string): unknown {
+  try {
+    const dot = token.indexOf(".");
+    if (dot < 0) return null;
+    const body = fromB64url(token.slice(0, dot)).toString("utf8");
+    if (!verifyContext(authorityPublicKey, LINK_CONTEXT, body, token.slice(dot + 1))) return null;
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
 }
 
 /**

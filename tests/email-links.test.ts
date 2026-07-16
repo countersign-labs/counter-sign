@@ -144,6 +144,28 @@ describe("single-use", () => {
   });
 });
 
+describe("path-prefixed mount (proxy preserves the prefix)", () => {
+  it("serves and decides at */decide, and the confirm form self-posts (not origin-root /decide)", async () => {
+    harness = await makeHarness();
+    const intent = makeIntent();
+    await harness.adapter.deliver(intent);
+    const decision = harness.adapter.awaitResolution(intent);
+    const token = createLinkToken(intent, "approve", authority.secretKey);
+    // GET at a PREFIXED path must render (handler matches "*/decide", not exactly "/decide").
+    const get = await fetch(`${harness.base}/approvals/decide?token=${encodeURIComponent(token)}`);
+    expect(get.status).toBe(200);
+    expect(await get.text()).not.toContain('action="/decide"'); // no origin-root action that 404s behind a prefix
+    // POST at the same prefixed path decides.
+    const post = await fetch(`${harness.base}/approvals/decide`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: `token=${encodeURIComponent(token)}`,
+    });
+    expect(post.status).toBe(200);
+    expect((await decision).decision).toBe("approve");
+  });
+});
+
 describe("settle() returning null is surfaced honestly (no false 'Countersignature issued')", () => {
   it("tells the human the decision was NOT recorded when the recipient is not a named approver, and does not burn the links", async () => {
     harness = await makeHarness(); // cfg.to = ops@countersign.local

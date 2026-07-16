@@ -550,6 +550,26 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     expect(resp.status).toBe(400);
   });
 
+  it("GET on an already-SPENT link shows the error page up front (does not serve the signing page)", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const b = passkeyApprover("m:cto");
+    const i = intentWith([a.approver, b.approver], 2); // quorum 2 — the intent STAYS pending after one approval
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    void signer.awaitResolution(i);
+    const url = signer.signingUrl(i, "m:ceo").replace(origin, base);
+    const token = new URL(url).searchParams.get("token");
+    const ch = await getChallenge(base, token, "approve");
+    expect((await record(base, token, "approve", ch, a.sign)).status).toBe(200); // m:ceo's link now spent; intent still 1/2
+    // Re-GET m:ceo's spent link: the page must reject up front, not render the full signing page
+    // (which would end in a wasted passkey ceremony + a 410 on POST).
+    const reget = await fetch(url);
+    expect(reget.status).toBe(410);
+    expect(await reget.text()).toContain("invalid, expired, or already decided");
+  });
+
   it("awaitResolution is idempotent — a repeat call returns the SAME promise (no fresh never-resolving wait)", async () => {
     const pending = new PendingDecisions();
     const a = passkeyApprover("m:ceo");

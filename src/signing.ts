@@ -16,7 +16,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { escapeHtml, PendingDecisions, readBody } from "./adapter.js";
+import { escapeHtml, pruneExpired, verifyBearerToken, PendingDecisions, readBody } from "./adapter.js";
 import { canonicalize } from "./core/canonical.js";
 import { fromB64url, publicKeyFromSecret, signContext, toB64url, utf8, verifyContext } from "./core/keys.js";
 import { normalizeActor } from "./core/countersignature.js";
@@ -53,18 +53,11 @@ export function createSigningToken(intent: Intent, actor: string, authoritySecre
 }
 
 export function verifySigningToken(token: string, authorityPublicKey: string): SignToken | null {
-  try {
-    const dot = token.indexOf(".");
-    if (dot < 0) return null;
-    const body = fromB64url(token.slice(0, dot)).toString("utf8");
-    if (!verifyContext(authorityPublicKey, LINK_CONTEXT, body, token.slice(dot + 1))) return null;
-    const p = JSON.parse(body) as SignToken;
-    if (p.typ !== "sign" || typeof p.intent_id !== "string" || typeof p.actor !== "string" || typeof p.exp !== "number" || !Number.isFinite(p.exp))
-      return null;
-    return p;
-  } catch {
+  // Shared decode+signature verify (LINK_CONTEXT); this caller enforces the SignToken shape.
+  const p = verifyBearerToken(token, authorityPublicKey) as SignToken | null;
+  if (!p || p.typ !== "sign" || typeof p.intent_id !== "string" || typeof p.actor !== "string" || typeof p.exp !== "number" || !Number.isFinite(p.exp))
     return null;
-  }
+  return p;
 }
 
 /** The unsigned receipt fields the assertion challenge is computed over. */
@@ -180,8 +173,12 @@ export class SigningServer {
   private get(url: URL, res: ServerResponse): void {
     const token = verifySigningToken(url.searchParams.get("token") ?? "", this.authorityPublicKey);
     // `found` is null unless the token is valid AND unexpired, so the guard needs only
-    // the token + found checks (the expiry is already folded into `found`).
-    const found = token && Date.now() < token.exp ? this.resolveApprover(token) : null;
+    // the token + found checks (the expiry is already folded into `found`). Also reject a
+    // link that is already SPENT here — the POST path checks `consumed`, so serving the full
+    // page for a used link just wastes a passkey ceremony that ends in a 410 (the email
+    // adapter's GET already rejects a decided link up front; match that honest UX).
+    const spent = token ? this.consumed.has(`${token.intent_id}\n${normalizeActor(token.actor)}`) : false;
+    const found = token && !spent && Date.now() < token.exp ? this.resolveApprover(token) : null;
     if (!token || !found) {
       res.writeHead(410, { "content-type": "text/html; charset=utf-8" }).end(page("This approval link is invalid, expired, or already decided.", ""));
       return;
@@ -244,7 +241,7 @@ export class SigningServer {
     // dead (no replay, no approve-then-veto from a second tab). Check BEFORE
     // resolveApprover so a replay after the Intent resolved still reports "used".
     // Prune expired entries first so the map can't grow without bound.
-    this.pruneConsumed(Date.now());
+    pruneExpired(this.consumed, Date.now());
     const useKey = `${token.intent_id}\n${normalizeActor(token.actor)}`;
     if (this.consumed.has(useKey)) return json(410, { error: "this approval link has already been used" });
     const found = this.resolveApprover(token);
@@ -270,11 +267,6 @@ export class SigningServer {
     return json(200, { status: result.status, decision: result.status === "resolved" ? result.decision : undefined, collected: result.collected, quorum: result.quorum });
   }
 
-  /** Drop spent-link entries whose token has already expired: an expired token is
-   *  rejected upstream (no replay is possible), so retaining it only leaks memory. */
-  private pruneConsumed(now: number): void {
-    for (const [key, exp] of this.consumed) if (now >= exp) this.consumed.delete(key);
-  }
 }
 
 

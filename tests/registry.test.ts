@@ -283,6 +283,35 @@ describe("the enroll CLI", () => {
     expect(reg.isActive("m:alice", alice.publicKey)).toBe(false);
   });
 
+  it("appends safely to a registry whose last line has NO trailing newline (no gluing/corruption)", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "cs-reg-")), "reg.jsonl");
+    execFileSync("npx", ["tsx", "scripts/enroll.ts", "--registry", path, "--actor", "m:alice", "--approver-key", alice.secretKey, "--org-key", org.secretKey], { encoding: "utf8" });
+    // Simulate a valid registry whose final newline was trimmed (still loads + verifies).
+    writeFileSync(path, readFileSync(path, "utf8").replace(/\n+$/, ""));
+    expect(ApproverRegistry.fromJSONL(readFileSync(path, "utf8")).verifyChain(orgPub)).toBe(true);
+    // A second enroll must NOT concatenate the new record onto the previous line.
+    execFileSync("npx", ["tsx", "scripts/enroll.ts", "--registry", path, "--actor", "m:bob", "--approver-key", bob.secretKey, "--org-key", org.secretKey], { encoding: "utf8" });
+    const reg = ApproverRegistry.fromJSONL(readFileSync(path, "utf8")); // would throw if a line were glued
+    expect(reg.all.length).toBe(2);
+    expect(reg.verifyChain(orgPub)).toBe(true);
+  });
+
+  it("refuses BOTH --approver-key and --public-key (mutually exclusive, no silent precedence)", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "cs-reg-")), "reg.jsonl");
+    try {
+      execFileSync(
+        "npx",
+        ["tsx", "scripts/enroll.ts", "--registry", path, "--actor", "m:x", "--approver-key", alice.secretKey, "--public-key", `webauthn-ed25519:${alice.publicKey}`, "--org-key", org.secretKey],
+        { encoding: "utf8", stdio: "pipe" },
+      );
+      throw new Error("should have exited non-zero");
+    } catch (e) {
+      const err = e as { status?: number; stderr?: string };
+      expect(err.status).toBe(2);
+      expect(String(err.stderr)).toMatch(/mutually exclusive/);
+    }
+  });
+
   it("refuses to append with a WRONG org-key (would produce a mixed-root registry) and exits nonzero", () => {
     const path = join(mkdtempSync(join(tmpdir(), "cs-reg-")), "reg.jsonl");
     execFileSync("npx", ["tsx", "scripts/enroll.ts", "--registry", path, "--actor", "m:alice", "--approver-key", alice.secretKey, "--org-key", org.secretKey], { encoding: "utf8" });

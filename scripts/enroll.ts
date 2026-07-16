@@ -32,6 +32,10 @@ const approverKey = arg("approver-key");
 const publicKeyArg = arg("public-key");
 
 if (!registryPath || !actor || !orgKey) die("usage: enroll --registry <file> --actor <actor> (--approver-key <secret>|--public-key <key>) --org-key <org-secret> [--revoke]", 2);
+// --approver-key and --public-key are mutually exclusive: silently letting one win would bind a
+// DIFFERENT key than the operator passed (e.g. the ed25519 key derived from the secret instead of the
+// explicit passkey descriptor), which then blocks every approval for that actor with no signal.
+if (approverKey && publicKeyArg) die("--approver-key and --public-key are mutually exclusive — pass exactly one (a raw ed25519 secret, or a public key/passkey descriptor)", 2);
 
 let registry: ApproverRegistry;
 try {
@@ -105,7 +109,12 @@ try {
   // REVOKE) vanished while the surviving file still verified. With appends, a concurrent
   // write at worst forks the hash chain, which verifyChain REPORTS instead of hiding, and
   // a crash mid-write truncates only the tail line, which fromJSONL rejects loudly.
-  appendFileSync(registryPath!, JSON.stringify(rec) + "\n");
+  // Guard the trailing newline: fromJSONL accepts (and verifyChain passes) a file whose last
+  // line has no "\n", so appending straight onto it would glue two records into one corrupt
+  // line while the CLI reports success. Prepend a "\n" iff the file has content not ending in one.
+  const existing = existsSync(registryPath!) ? readFileSync(registryPath!, "utf8") : "";
+  const sep = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+  appendFileSync(registryPath!, sep + JSON.stringify(rec) + "\n");
   // The chain was verified under --org-key before appending (line ~51) and enroll/revoke maintain it,
   // so it is intact by construction — no need to re-walk and re-verify every record's signature here
   // (O(records) crypto) just to print a status word.

@@ -393,7 +393,18 @@ export class ReceiptLog implements ReceiptSink {
           } else if (approver?.mode === "keyed") {
             // A keyed slot must NOT be bound to ANY authority key (a keyed decision must be
             // the approver's OWN key), then verified against that own bound key.
-            if (authorityKeys && approver.public_key && authorityKeys.includes(credentialKeyMaterial(approver.public_key))) reason = "untrusted-key";
+            if (authorityKeys === undefined && opts.trustedKeys === undefined && opts.trustedAgentKeys === undefined) {
+              // BARE mode (no authorityKey, no trustedKeys, no trustedAgentKeys): there is NO anchor
+              // to check separation of duty against. The keyed-slot SoD check (approver-key ≠ authority)
+              // and the agent ≠ authority guard both need the authority key; a self-signed keyed receipt
+              // then proves only that SOME key the Intent named signed it, which the authority-key holder
+              // forges by authoring the Intent as its own agent and binding a key it controls. Fault
+              // honestly (like vouched/Default in bare mode), never silently pass ok=true. Any ONE anchor
+              // closes it: authorityKey (rejects agent==authority and keyed-slot==authority), trustedAgentKeys
+              // (a pure-authority-key holder can't sign the Intent as a pinned agent), or trustedKeys
+              // (constrains the approver key to an allowlist the attacker's forged key isn't in).
+              reason = "missing-authority-key";
+            } else if (authorityKeys && approver.public_key && authorityKeys.includes(credentialKeyMaterial(approver.public_key))) reason = "untrusted-key";
             else if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else if (isTimeoutDefault) {
             // The timeout Default, checked like verifyResolution's default branch: decision
@@ -412,13 +423,14 @@ export class ReceiptLog implements ReceiptSink {
           } else {
             reason = "untrusted-key"; // actor is not an approver of this Intent
           }
-          // `trustedKeys` is an ADDITIONAL allowlist: a receipt that passed its per-mode
-          // check must ALSO be signed by a key the auditor trusts. Applying it here (not
-          // only in the no-Intent fallback) means a keyed receipt whose approver key is
-          // NOT in trustedKeys is still faulted — the auditor's trust policy is honored,
-          // not silently dropped once the Intent authenticates. (authorityKey remains the
-          // distinct anchor for vouched/Default receipts; trustedKeys does not replace it.)
-          if (reason === undefined && opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn }))
+          // `trustedKeys` is an ADDITIONAL allowlist for KEYED (approver-signed) receipts ONLY:
+          // one that passed its per-key check must ALSO be signed by a key the auditor trusts, so a
+          // keyed receipt whose approver key is not in trustedKeys is still faulted — the auditor's
+          // trust policy is honored, not silently dropped once the Intent authenticates. It must NOT
+          // gate authority-signed vouched approvals or the timeout Default: those are anchored by the
+          // dedicated authorityKey, and trustedKeys legitimately holds only approver keys — gating
+          // them here would false-fault every honest vouched/Default receipt on an untampered log.
+          if (reason === undefined && approver?.mode === "keyed" && opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn }))
             reason = "untrusted-key";
         } else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) {
           // No Intents supplied → fall back to the global trusted-set check.

@@ -280,6 +280,66 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     expect((await resolution).decision).toBe("approve"); // quorum met by two OWN-key receipts
   });
 
+  it("awaitResolution BEFORE deliver still resolves (idempotent wait, no clobber)", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const i = intentWith([a.approver], 1);
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    const adapter = new SigningLinkAdapter({ server: signer, notify: () => {} });
+
+    // Await FIRST, before deliver — the old consume-once map stranded this promise
+    // because deliver() then registered a SECOND wait that clobbered the entry.
+    const resolution = adapter.awaitResolution(i);
+    await adapter.deliver(i); // idempotent wait → same entry/promise
+
+    const url = signer.signingUrl(i, "m:ceo").replace(origin, base);
+    const token = new URL(url).searchParams.get("token");
+    const ch = await getChallenge(base, token, "approve");
+    expect((await record(base, token, "approve", ch, a.sign)).status).toBe(200);
+    expect((await resolution).decision).toBe("approve"); // the pre-deliver promise resolves
+  });
+
+  it("wrapAction uses the adapter's webauthn policy when opts.webauthn is omitted", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const { server, signer } = makeServer(pending); // server has the RP policy
+    servers.push(server);
+    const base = await listen(server);
+    const sent: { actor: string; url: string }[] = [];
+    const adapter = new SigningLinkAdapter({ server: signer, notify: (l) => void sent.push({ actor: l.actor, url: l.url }) });
+    let ran = false;
+    const deploy = wrapAction(
+      () => { ran = true; return "deployed"; },
+      { action: "prod.deploy", summary: "Deploy 2.4.0 to production", risk_tier: "critical", approvers: [a.approver], quorum: 1, timeout: 300, default: "reject" },
+      adapter,
+      { agent, authorityKey: authority.secretKey }, // NO opts.webauthn — the adapter supplies it
+    );
+    const resultP = deploy();
+    for (let i = 0; i < 100 && sent.length < 1; i++) await new Promise((r) => setTimeout(r, 5));
+    const url = new URL(sent[0].url.replace(origin, base));
+    const token = url.searchParams.get("token");
+    const ch = await getChallenge(base, token, "approve");
+    expect((await record(base, token, "approve", ch, a.sign)).status).toBe(200);
+    expect(await resultP).toBe("deployed"); // verified with the adapter's policy — no split-brain
+    expect(ran).toBe(true);
+  });
+
+  it("wrapAction rejects a webauthn policy that diverges from the adapter's", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const { signer } = makeServer(pending); // policy: { rpId, allowedOrigins:[origin] }, no UV
+    const adapter = new SigningLinkAdapter({ server: signer, notify: () => {} });
+    const deploy = wrapAction(
+      () => "x",
+      { action: "a", summary: "s", risk_tier: "critical", approvers: [a.approver], quorum: 1, timeout: 300, default: "reject" },
+      adapter,
+      { agent, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin], requireUserVerification: true } }, // diverges (UV)
+    );
+    await expect(deploy()).rejects.toThrow(/SAME policy|differs/);
+  });
+
   it("refuses to deliver a vouched approver (no key to sign a link with)", async () => {
     const pending = new PendingDecisions();
     const { signer } = makeServer(pending);

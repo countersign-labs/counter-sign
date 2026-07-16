@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { canonicalize } from "./canonical.js";
 import { normalizeActor } from "./countersignature.js";
 import { CountersignError } from "./errors.js";
-import { isCanonicalPublicKey, signContext, verifyContext, type Keypair } from "./keys.js";
+import { isCanonicalPublicKey, publicKeyFromSecret, signContext, verifyContext, type Keypair } from "./keys.js";
 import { credentialKeyMaterial, isValidCredentialDescriptor } from "./webauthn.js";
 import { COUNTERSIGN_VERSION, INTENT_CONTEXT, type Approver, type Intent, type IntentFields } from "./types.js";
 
@@ -87,6 +87,11 @@ export function createIntent(fields: IntentFields, agent: AgentIdentity): Intent
     throw new CountersignError("agent.id must be a non-empty string");
   if (typeof agent.keypair?.publicKey !== "string" || !isCanonicalPublicKey(agent.keypair.publicKey))
     throw new CountersignError("agent.keypair.publicKey must be a canonical ed25519 key");
+  // The embedded public_key MUST correspond to the signing secret, or the Intent
+  // would be signed by the secret yet carry an unrelated key — passing wrap-time
+  // checks but failing verifyIntent only AFTER a human approves (a split-brain).
+  if (publicKeyFromSecret(agent.keypair.secretKey) !== agent.keypair.publicKey)
+    throw new CountersignError("agent.keypair.publicKey does not correspond to its secretKey");
   if (!fields.action) throw new CountersignError("Intent.action is required");
   if (!fields.summary) throw new CountersignError("Intent.summary is required");
   if (!RISK_TIERS.has(fields.risk_tier)) throw new CountersignError(`invalid risk_tier: ${fields.risk_tier}`);

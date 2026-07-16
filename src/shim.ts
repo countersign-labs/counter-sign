@@ -75,14 +75,19 @@ export function wrapAction<A extends unknown[], R>(
     const agent = opts.agent ?? defaultAgent();
     const intent = createIntent(fields, agent);
     const authority = opts.authorityKey ?? authorityKeyFromEnv();
+    // The adapter (e.g. SigningLinkAdapter) may carry the WebAuthn policy its signer
+    // verifies against; verify with the SAME policy — otherwise the signer accepts an
+    // assertion the verifier later rejects (a post-approval split-brain). Reconcile:
+    // use whichever is supplied, and if BOTH are given they MUST be identical.
+    const webauthn = reconcileWebAuthn(opts.webauthn, adapter.webauthn);
     // Fail fast on configurations that would otherwise be rejected only AFTER a human
     // approves — a split-brain where the approver is told "approved" but the guarded
     // action is silently blocked. Runs before anything is delivered.
-    assertDeliverable(intent, authority, opts.webauthn);
+    assertDeliverable(intent, authority, webauthn);
     opts.onIntent?.(intent);
 
     await adapter.deliver(intent);
-    const resolution = await awaitWithDefault(intent, adapter.awaitResolution(intent), authority, opts.webauthn);
+    const resolution = await awaitWithDefault(intent, adapter.awaitResolution(intent), authority, webauthn);
     const decisive = resolution.countersignatures[resolution.countersignatures.length - 1];
     opts.onResolution?.(resolution);
     if (decisive) opts.onDecision?.(decisive);
@@ -94,6 +99,30 @@ export function wrapAction<A extends unknown[], R>(
     if (resolution.decision !== "approve") throw new IntentRejectedError(resolution, intent);
     return await fn(...args);
   };
+}
+
+/** True iff two WebAuthn policies are equivalent (origin order-insensitive). */
+function samePolicy(a: WebAuthnPolicy, b: WebAuthnPolicy): boolean {
+  return (
+    a.rpId === b.rpId &&
+    !!a.requireUserVerification === !!b.requireUserVerification &&
+    a.allowedOrigins.length === b.allowedOrigins.length &&
+    a.allowedOrigins.every((o) => b.allowedOrigins.includes(o))
+  );
+}
+
+/**
+ * The single WebAuthn policy to sign AND verify passkey receipts with. The adapter's
+ * signer (SigningServer) and this runtime's verifier (verifyResolution) must agree, or
+ * an assertion the signer accepts is rejected at verification — a post-approval
+ * split-brain. Use whichever policy is supplied; if BOTH are, they MUST be identical.
+ */
+function reconcileWebAuthn(fromOpts?: WebAuthnPolicy, fromAdapter?: WebAuthnPolicy): WebAuthnPolicy | undefined {
+  if (fromOpts && fromAdapter && !samePolicy(fromOpts, fromAdapter))
+    throw new CountersignError(
+      "wrapAction: the `webauthn` policy in opts differs from the adapter's SigningServer policy — the signer and verifier must use the SAME policy (rpId, allowedOrigins, requireUserVerification), or a valid assertion would be rejected after approval",
+    );
+  return fromOpts ?? fromAdapter;
 }
 
 /**

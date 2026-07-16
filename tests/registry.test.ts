@@ -215,6 +215,14 @@ describe("assertApproversEnrolled (strict mode) + end-to-end", () => {
     expect(() => assertApproversEnrolled(i, reg, alias, authPub)).toThrow(/canonical/);
   });
 
+  it("rejects an Intent with an invalid agent signature (verifyIntent, like verifyResolution)", () => {
+    const reg = new ApproverRegistry();
+    reg.enroll("m:alice", alice.publicKey, org.secretKey, { pop: createEnrollmentProof("m:alice", alice.secretKey) });
+    const i = keyedIntent([keyed("m:alice", alice)], 1);
+    const tampered = { ...i, summary: "TAMPERED after signing" }; // invalidates the agent signature
+    expect(() => assertApproversEnrolled(tampered, reg, orgPub, authPub)).toThrow(/valid agent signature/);
+  });
+
   it("rejects when the org-root key IS the runtime authority key (separation of duty)", () => {
     // The registry's whole point is an org root DISTINCT from the runtime authority.
     // If a deployment configured them as one key, a compromised authority could also

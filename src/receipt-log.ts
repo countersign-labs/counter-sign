@@ -322,10 +322,16 @@ export class ReceiptLog implements ReceiptSink {
     // ([], "", [""]) all make the membership check match nothing, faulting every receipt as
     // untrusted-key on an honest log (the same false alarm the array-only guard closed; "" slipped past
     // it because `typeof "" === "string"`). authorityKey has no such hole — its "" fails isCanonicalPublicKey.
+    // Normalize ONCE here and build the material Set from the same `tk` — a second normalization site
+    // could silently diverge from this guard about what counts as a trusted key. The Set is keyed by
+    // credentialKeyMaterial so raw K and its descriptor webauthn-ed25519:K are ONE identity (one key,
+    // one holder) in EVERY trustedKeys check — the keyed gate and the no-intents fallback alike.
+    let trustedMaterials: Set<string> | undefined;
     if (opts.trustedKeys !== undefined) {
       const tk = typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys;
       if (!tk.some((k) => k !== ""))
         throw new CountersignError("verifyAll: trustedKeys must not be empty — omit it, or supply at least one (non-empty) key");
+      trustedMaterials = new Set(tk.map(credentialKeyMaterial));
     }
     // An Intent's approver bindings are only a trust anchor if the Intent ITSELF
     // authenticates — otherwise a tampered archived Intent (approver key swapped,
@@ -367,13 +373,6 @@ export class ReceiptLog implements ReceiptSink {
         } else if (typeof i?.intent_id === "string") unverifiedIntentIds.add(i.intent_id);
       }
     }
-    // Precompute the normalized trusted-key material ONCE (same credentialKeyMaterial normalization the
-    // keyed gate uses), so the per-receipt keyed trustedKeys check is an O(1) Set lookup rather than
-    // re-normalizing the whole allowlist for every receipt (O(receipts × trustedKeys)).
-    const trustedMaterials =
-      opts.trustedKeys === undefined
-        ? undefined
-        : new Set((typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys).map(credentialKeyMaterial));
     const lines = await this.parseLines();
     const chain = walkChain(lines, opts.expectedHead);
     const faults: ReceiptFault[] = [];
@@ -471,8 +470,11 @@ export class ReceiptLog implements ReceiptSink {
           // by the dedicated authorityKey; trustedKeys legitimately holds only approver keys).
           if (reason === undefined && approver?.mode === "keyed" && trustedMaterials !== undefined && !trustedMaterials.has(credentialKeyMaterial(cs.public_key)))
             reason = "untrusted-key";
-        } else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) {
-          // No Intents supplied → fall back to the global trusted-set check.
+        } else if (trustedMaterials !== undefined && !trustedMaterials.has(credentialKeyMaterial(cs.public_key))) {
+          // No Intents supplied → the global trusted-set MEMBERSHIP check, by credentialKeyMaterial —
+          // the SAME identity semantics as the keyed gate above (raw K ≡ webauthn-ed25519:K), so the
+          // audit verdict cannot flip based on whether `intents` was supplied or which equivalent
+          // form the auditor listed. The signature itself was already verified in check (1) above.
           reason = "untrusted-key";
         }
       }

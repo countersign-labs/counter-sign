@@ -144,6 +144,53 @@ describe("single-use", () => {
   });
 });
 
+describe("settle() returning null is surfaced honestly (no false 'Countersignature issued')", () => {
+  it("tells the human the decision was NOT recorded when the recipient is not a named approver, and does not burn the links", async () => {
+    harness = await makeHarness(); // cfg.to = ops@countersign.local
+    // The Intent names a DIFFERENT approver than the configured recipient: deliver()
+    // emails cfg.to anyway, that human confirms, and settle() returns null (unlisted
+    // actor). The page must NOT claim a Countersignature was issued — that would tell
+    // a human "approved" while the Intent silently falls to its timeout Default.
+    const intent = createIntent(
+      { action: "demo.op", summary: "Do the thing", risk_tier: "high", approvers: ["email:security@corp.local"], timeout: 300, default: "reject" },
+      agent,
+    );
+    await harness.adapter.deliver(intent);
+    void harness.adapter.awaitResolution(intent).catch(() => {}); // register; consumed by close()
+    const token = createLinkToken(intent, "approve", authority.secretKey);
+    const post = await postDecision(harness, token);
+    const text = await post.text();
+    expect(post.status).not.toBe(200);
+    expect(text).not.toContain("has been issued");
+    expect(text).toMatch(/not recorded|could not be recorded/i);
+    // The links are NOT burned: the intent is still pending, so the confirm page still renders.
+    const get = await getPage(harness, token);
+    expect(get.status).toBe(200);
+    expect(await get.text()).toContain("Nothing happens until you press the button");
+  });
+});
+
+describe("decided-set hygiene (long-running callback server)", () => {
+  it("prunes decided entries once their links have expired (no unbounded growth)", async () => {
+    harness = await makeHarness();
+    const a = makeIntent(1); // 1-second window: its links die upstream at the expiry check
+    await harness.adapter.deliver(a);
+    const dA = harness.adapter.awaitResolution(a);
+    expect((await postDecision(harness, createLinkToken(a, "approve", authority.secretKey))).status).toBe(200);
+    await dA;
+    const decided = (harness.adapter as unknown as { decided: { has(k: string): boolean } }).decided;
+    expect(decided.has(a.intent_id)).toBe(true);
+    await new Promise((r) => setTimeout(r, 1100)); // past a's deadline — the entry is now useless
+    const b = makeIntent(300);
+    await harness.adapter.deliver(b);
+    const dB = harness.adapter.awaitResolution(b);
+    expect((await postDecision(harness, createLinkToken(b, "approve", authority.secretKey))).status).toBe(200);
+    await dB;
+    expect(decided.has(a.intent_id)).toBe(false); // pruned when the next decision landed
+    expect(decided.has(b.intent_id)).toBe(true);
+  }, 10000);
+});
+
 describe("expiry matches the Intent timeout", () => {
   it("a token whose deadline has passed cannot decide, by GET or POST", async () => {
     harness = await makeHarness();

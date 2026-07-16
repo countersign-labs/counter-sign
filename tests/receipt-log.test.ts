@@ -474,6 +474,20 @@ describe("verifyAll()", () => {
     await expect(log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedKeys: "" })).rejects.toThrow(/trustedKeys must not be empty|at least one/);
   });
 
+  it("no-intents trustedKeys fallback matches by credentialKeyMaterial (raw ≡ descriptor), same as the keyed gate", async () => {
+    // The keyed gate treats raw K and webauthn-ed25519:K as ONE identity (one key, one holder).
+    // The no-intents fallback must use the SAME semantics — else the identical allowlist flips the
+    // audit verdict depending on whether `intents` was supplied, and the equivalent-form key
+    // false-faults an honest log.
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority)); // public_key = raw authorityPub
+    const r = await log.verifyAll({ trustedKeys: [`webauthn-ed25519:${authorityPub}`] }); // descriptor form of the SAME key
+    expect(r.faults).toEqual([]);
+    expect(r.ok).toBe(true);
+    // A genuinely different key still faults.
+    expect((await log.verifyAll({ trustedKeys: [`webauthn-ed25519:${generateKeypair().publicKey}`] })).ok).toBe(false);
+  });
+
   it("throws on an EMPTY intents array (would fault every receipt as unknown-intent)", async () => {
     // Symmetric to the other empty-array guards: intents: [] builds an empty binding map, so every
     // receipt on an honest log faults unknown-intent (ok:false) — a false tamper alarm. Reject it.

@@ -105,6 +105,11 @@ export class SigningLinkAdapter implements Adapter {
     // deadline would look "resolved" and skip the fail-closed guard below (a fail-open
     // under default:"approve"). The flag also serves as the no-unhandled-rejection catch.
     let settled = false;
+    // Mark when the wait settles (real decision or abort) — but do NOT drop the captured
+    // entry here: a decision that settles DURING delivery must still be returnable by the
+    // awaitResolution() that runs after deliver(). The deadline timer below reclaims it
+    // (bounded lifetime) so idempotent awaitResolution doesn't leak. Also serves as the
+    // no-unhandled-rejection handler.
     pending.then(() => { settled = true; }, () => { settled = true; });
 
     // BEST-EFFORT delivery, CONCURRENTLY — independent channels; one slow/hung channel
@@ -128,7 +133,10 @@ export class SigningLinkAdapter implements Adapter {
     await Promise.race([
       batch,
       pending.then(() => {}, () => {}),
-      new Promise<void>((res) => { const t = setTimeout(res, remaining); t.unref?.(); }),
+      // At the deadline the Intent is dead (the runtime mints its Default). Also drop the
+      // captured entry then, so a delivered-but-timed-out Intent (whose wait never settles)
+      // doesn't linger in the map.
+      new Promise<void>((res) => { const t = setTimeout(() => { this.captured.delete(intent.intent_id); res(); }, remaining); t.unref?.(); }),
     ]);
 
     // Swallow a partial delivery only when it fails SAFE: a decision already settled, or
@@ -148,11 +156,10 @@ export class SigningLinkAdapter implements Adapter {
 
   awaitResolution(intent: Intent): Promise<Resolution> {
     // Return the promise deliver() captured — it survives a resolve+evict during the
-    // notify loop, and a reject from a concurrent close(). Only if there is none do we
-    // consider a fresh wait; after close() we refuse (a fresh wait would never resolve,
-    // and letting it fall to the timeout Default would be a fail-open on shutdown).
+    // notify loop, and a reject from a concurrent close(). Idempotent: repeated calls
+    // (e.g. a supervisor re-subscribing) return the SAME promise while it's live, rather
+    // than minting a fresh, never-resolving wait; the settle/deadline cleanup removes it.
     const p = this.captured.get(intent.intent_id);
-    this.captured.delete(intent.intent_id);
     if (p) return p;
     if (this.closed) return Promise.reject(new CountersignError("signing-link adapter is closed"));
     return this.server.awaitResolution(intent);

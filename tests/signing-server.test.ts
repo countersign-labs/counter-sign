@@ -550,6 +550,18 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     expect(resp.status).toBe(400);
   });
 
+  it("awaitResolution is idempotent — a repeat call returns the SAME promise (no fresh never-resolving wait)", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const i = intentWith([a.approver], 1);
+    const { signer } = makeServer(pending);
+    const adapter = new SigningLinkAdapter({ server: signer, notify: () => {} });
+    await adapter.deliver(i);
+    const p1 = adapter.awaitResolution(i);
+    const p2 = adapter.awaitResolution(i);
+    expect(p1).toBe(p2); // same captured promise, not a brand-new pending.wait
+  });
+
   it("deliver() after close() is refused", async () => {
     const pending = new PendingDecisions();
     const a = passkeyApprover("m:ceo");

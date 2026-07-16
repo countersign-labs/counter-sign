@@ -38,8 +38,10 @@ if (!registryPath || !actor || !orgKey) die("usage: enroll --registry <file> --a
 if (approverKey && publicKeyArg) die("--approver-key and --public-key are mutually exclusive — pass exactly one (a raw ed25519 secret, or a public key/passkey descriptor)", 2);
 
 let registry: ApproverRegistry;
+let rawRegistry = ""; // the file's exact bytes at load — reused below for the append newline check
 try {
-  registry = existsSync(registryPath!) ? ApproverRegistry.fromJSONL(readFileSync(registryPath!, "utf8")) : new ApproverRegistry();
+  rawRegistry = existsSync(registryPath!) ? readFileSync(registryPath!, "utf8") : "";
+  registry = rawRegistry ? ApproverRegistry.fromJSONL(rawRegistry) : new ApproverRegistry();
 } catch (e) {
   die(`could not load registry at ${registryPath}: ${(e as Error).message}`, 2);
 }
@@ -111,9 +113,9 @@ try {
   // a crash mid-write truncates only the tail line, which fromJSONL rejects loudly.
   // Guard the trailing newline: fromJSONL accepts (and verifyChain passes) a file whose last
   // line has no "\n", so appending straight onto it would glue two records into one corrupt
-  // line while the CLI reports success. Prepend a "\n" iff the file has content not ending in one.
-  const existing = existsSync(registryPath!) ? readFileSync(registryPath!, "utf8") : "";
-  const sep = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+  // line while the CLI reports success. Prepend a "\n" iff the file (as read at load) has content
+  // not ending in one — reusing rawRegistry rather than re-reading the whole file a second time.
+  const sep = rawRegistry.length > 0 && !rawRegistry.endsWith("\n") ? "\n" : "";
   appendFileSync(registryPath!, sep + JSON.stringify(rec) + "\n");
   // The chain was verified under --org-key before appending (line ~51) and enroll/revoke maintain it,
   // so it is intact by construction — no need to re-walk and re-verify every record's signature here

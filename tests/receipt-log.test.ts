@@ -488,6 +488,19 @@ describe("verifyAll()", () => {
     expect((await log.verifyAll({ trustedKeys: [`webauthn-ed25519:${generateKeypair().publicKey}`] })).ok).toBe(false);
   });
 
+  it("rejects malformed option SHAPES with a clean CountersignError (no raw TypeError, no fail-open)", async () => {
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority));
+    // [2] authorityKey: null → clean error, not a `[...null]` TypeError that aborts the audit.
+    await expect(log.verifyAll({ intents: [i], authorityKey: null as unknown as string })).rejects.toThrow(/authorityKey must be a string or an array/);
+    // [1] trustedKeys: null → clean error, not a `null.filter` TypeError.
+    await expect(log.verifyAll({ intents: [i], trustedKeys: null as unknown as string })).rejects.toThrow(/trustedKeys must be a string or an array/);
+    // [3] intents: a single Intent object (not an array) → clean error, not a `for…of` TypeError.
+    await expect(log.verifyAll({ intents: i as unknown as Intent[] })).rejects.toThrow(/intents must be an array/);
+    // [0] trustedAgentKeys: "" → clean error; must NOT silently disable the agent-key pin (fail-open).
+    await expect(log.verifyAll({ intents: [i], trustedAgentKeys: "" as unknown as string[] })).rejects.toThrow(/trustedAgentKeys must be an array/);
+  });
+
   it("does not CRASH on a non-string trustedKeys entry — filters it, cleanly errors if none usable", async () => {
     const i = intent();
     await log.append(signDecision(i, "approve", "local:a", authority)); // public_key = raw authorityPub

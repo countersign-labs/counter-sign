@@ -144,6 +144,18 @@ export function assertIntentInvariants(intent: Intent): void {
   if (!intent || typeof intent !== "object") throw new CountersignError("intent must be an object");
   if (typeof intent.intent_id !== "string" || intent.intent_id.length === 0)
     throw new CountersignError("Intent.intent_id must be a non-empty string");
+  // The agent key must be a CANONICAL ed25519 key. base64url is not injective, so a
+  // non-canonical alias decodes to the same 32 bytes as another key while comparing
+  // unequal as a string — and downstream `verifyResolution` blocks the "authority
+  // authored its own Intent" forge with a string compare (agent.public_key ===
+  // authority key). Without canonicality here, an authority-key holder could sign an
+  // Intent under an alias of its own key, dodge that compare, and forge a whole keyed
+  // quorum. Approver keys and the expected authority key are already required
+  // canonical; the agent key must be too.
+  if (!intent.agent || typeof intent.agent !== "object" || typeof intent.agent.id !== "string" || intent.agent.id.length === 0)
+    throw new CountersignError("Intent.agent must carry a non-empty id");
+  if (typeof intent.agent.public_key !== "string" || !isCanonicalPublicKey(intent.agent.public_key))
+    throw new CountersignError("Intent.agent.public_key must be a canonical ed25519 key");
   if (typeof intent.action !== "string" || intent.action.length === 0)
     throw new CountersignError("Intent.action is required");
   if (typeof intent.summary !== "string" || intent.summary.length === 0)

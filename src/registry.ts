@@ -252,6 +252,11 @@ export function assertApproversEnrolled(
 ): void {
   if (!isCanonicalPublicKey(expectedAuthorityPublicKey))
     throw new CountersignError("expected authority public key is not a canonical ed25519 key");
+  // Both keys must be canonical or the distinctness compare below could be dodged by
+  // a non-canonical alias of the authority key passed as the org key (it decodes to
+  // the same bytes verifyChain accepts, yet mismatches the `===`).
+  if (!isCanonicalPublicKey(orgPublicKey))
+    throw new CountersignError("org-root public key is not a canonical ed25519 key");
   if (orgPublicKey === expectedAuthorityPublicKey)
     throw new CountersignError(
       "the approver registry's org-root key must be distinct from the runtime authority key — sharing them collapses the separation of duty the registry provides",

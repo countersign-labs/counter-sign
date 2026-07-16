@@ -5,17 +5,30 @@
 // positive + negative matrix at the verifyResolution boundary, plus the CLI signer.
 
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { canonicalize } from "../src/core/canonical.js";
 import { signDecision } from "../src/core/countersignature.js";
 import { verifyResolution } from "../src/core/defaults.js";
 import { InvalidCountersignatureError } from "../src/core/errors.js";
-import { createIntent } from "../src/core/intent.js";
+import { assertIntentInvariants, createIntent } from "../src/core/intent.js";
 import { LocalAdapter } from "../src/adapters/local.js";
-import { fromB64url, generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
-import type { Approver, Intent, Resolution } from "../src/core/types.js";
+import { fromB64url, generateKeypair, publicKeyFromSecret, signContext, type Keypair } from "../src/core/keys.js";
+import { INTENT_CONTEXT, type Approver, type Intent, type Resolution } from "../src/core/types.js";
+
+/** A DIFFERENT base64url string that decodes to the same 32 bytes as `key` (non-canonical). */
+function nonCanonicalAlias(key: string): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const bytes = fromB64url(key);
+  for (const c of alphabet) {
+    const cand = key.slice(0, -1) + c;
+    if (cand !== key && fromB64url(cand).length === 32 && fromB64url(cand).equals(bytes)) return cand;
+  }
+  return "";
+}
 
 const agent = { id: "agent:test", keypair: generateKeypair() };
 const authority = generateKeypair();
@@ -185,6 +198,44 @@ describe("keyed quorum — negative (a compromised authority key cannot forge it
       signDecision(i, "approve", "m:bob", bob.secretKey, "approver"),
     ]);
     expect(() => verifyResolution(i, r, authPub)).toThrow(/agent and .*authority keys must be distinct|authored by the authority key/);
+  });
+
+  it("HEADLINE: a non-canonical agent-key ALIAS of the authority cannot forge a keyed quorum", () => {
+    // The forge the keyed design must block: a holder of ONLY the authority key emits
+    // a non-canonical alias of its own public key (same 32 bytes, different string),
+    // authors an Intent under it (agent == authority in disguise, dodging the raw
+    // string compare), binds TWO attacker-generated approver keys, and signs both
+    // receipts. Without a canonicality gate on the agent key this passed; it must not.
+    const alias = nonCanonicalAlias(authPub);
+    expect(alias).not.toBe("");
+    const unsigned = {
+      countersign: "0.2" as const,
+      intent_id: randomUUID(),
+      agent: { id: "agent:evil", public_key: alias },
+      action: "prod.deploy",
+      summary: "s",
+      risk_tier: "critical" as const,
+      approvers: [keyed("m:alice", alice), keyed("m:bob", bob)],
+      quorum: 2,
+      timeout: 300,
+      default: "reject" as const,
+      callback: null,
+      created_at: new Date().toISOString(),
+    };
+    const signature = signContext(authority.secretKey, INTENT_CONTEXT, canonicalize(unsigned));
+    const forged = { ...unsigned, signature } as unknown as Intent;
+    const r = res("approve", [
+      signDecision(forged, "approve", "m:alice", alice.secretKey, "approver"),
+      signDecision(forged, "approve", "m:bob", bob.secretKey, "approver"),
+    ]);
+    expect(() => verifyResolution(forged, r, authPub)).toThrow(/canonical/);
+  });
+
+  it("assertIntentInvariants rejects a non-canonical agent public key", () => {
+    const i = keyedIntent(2);
+    const alias = nonCanonicalAlias(i.agent.public_key);
+    expect(alias).not.toBe("");
+    expect(() => assertIntentInvariants({ ...i, agent: { ...i.agent, public_key: alias } })).toThrow(/canonical/);
   });
 
   it("rejects a non-canonical expected authority public key (alias bypass)", () => {

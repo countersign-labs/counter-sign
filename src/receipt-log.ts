@@ -68,7 +68,7 @@ export interface ReceiptFault {
   index: number;
   intent_id: string;
   actor: string;
-  reason: "invalid-signature" | "untrusted-key" | "unknown-intent" | "unverified-intent" | "missing-webauthn-policy" | "malformed";
+  reason: "invalid-signature" | "untrusted-key" | "unknown-intent" | "unverified-intent" | "missing-webauthn-policy" | "missing-authority-key" | "malformed";
 }
 
 /** The result of re-verifying an entire ReceiptLog. */
@@ -97,11 +97,13 @@ export interface VerifyAllOptions extends VerifyOptions {
    */
   trustedAgentKeys?: readonly string[];
   /**
-   * The runtime authority public key, for the separation-of-duty checks
-   * verifyResolution enforces: a keyed slot must NOT be bound to it, and a timeout
-   * Default must be signed by it. Distinct from `trustedKeys` (a general allowlist that
-   * may legitimately contain approver keys), so supplying approver keys there no longer
-   * mis-flags honest keyed receipts. Supply it to audit those rules; omit to skip them.
+   * The runtime authority public key — THE anchor for every authority-signed receipt
+   * (vouched approvals and the timeout Default) and for the keyed-slot separation-of-duty
+   * check, exactly as verifyResolution's expectedAuthorityPublicKey. Dedicated and
+   * distinct from `trustedKeys` (a general allowlist that may legitimately hold approver
+   * keys). Supply it to audit authority-signed receipts: WITHOUT it, a vouched/Default
+   * receipt cannot be verified and faults as `missing-authority-key` (honest — not
+   * silently valid, not a tamper alarm). Must be a canonical ed25519 key.
    */
   authorityKey?: string;
   /**
@@ -345,34 +347,38 @@ export class ReceiptLog implements ReceiptSink {
           const csActor = normalizeActor(cs.actor);
           const approver = intent.approvers.find((a) => normalizeActor(a.actor) === csActor);
           const isTimeoutDefault = cs.policy === "default" && csActor === DEFAULT_TIMEOUT_ACTOR;
+          // The authority key is THE anchor for every authority-signed receipt (vouched
+          // approvals + the timeout Default) and for the keyed-slot separation-of-duty
+          // check — exactly as verifyResolution uses expectedAuthorityPublicKey. It is a
+          // DEDICATED option, distinct from the general `trustedKeys` allowlist (which
+          // may legitimately hold approver keys). To verify an authority-signed receipt
+          // you MUST supply it; without it such a receipt faults as `missing-authority-key`
+          // — honest (can't verify), never silently valid, never a tamper alarm.
+          const authorityKey = opts.authorityKey;
           if (approver && cs.policy !== "approver") {
             // A named approver's receipt is always an "approver" decision. A "default"
             // (or other) policy on it is the timeout-Default label smuggled onto a human
             // slot — verifyResolution rejects exactly this, so the audit must too.
             reason = "untrusted-key";
           } else if (approver?.mode === "keyed") {
-            // A keyed slot must NOT be bound to the runtime AUTHORITY key (verifyResolution
-            // rejects exactly this — a keyed decision must be the approver's OWN key, not
-            // one the authority also holds). Uses the dedicated `authorityKey`, so a
-            // general `trustedKeys` allowlist that legitimately holds approver keys does
-            // not mis-flag them; omitting `authorityKey` skips only this SoD check.
-            if (opts.authorityKey && approver.public_key && credentialKeyMaterial(approver.public_key) === opts.authorityKey) reason = "untrusted-key";
+            // A keyed slot must NOT be bound to the authority key (a keyed decision must be
+            // the approver's OWN key), then verified against that own bound key.
+            if (authorityKey && approver.public_key && credentialKeyMaterial(approver.public_key) === authorityKey) reason = "untrusted-key";
             else if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else if (isTimeoutDefault) {
-            // The timeout Default, checked like verifyResolution's default branch: its
-            // decision matches the quorum-derived expected default, it is stamped at/after
-            // the deadline (never backdated), and it is authority-signed.
+            // The timeout Default, checked like verifyResolution's default branch: decision
+            // matches the quorum-derived default, stamped at/after the deadline (not
+            // backdated), and authority-signed.
             const expectedDefault = quorumOf(intent) > 1 ? "reject" : intent.default;
-            const authoritySigner = opts.authorityKey ?? opts.trustedKeys;
             if (cs.decision !== expectedDefault) reason = "untrusted-key";
             else if (!(Date.parse(cs.timestamp) >= deadline(intent))) reason = "untrusted-key";
-            else if (authoritySigner !== undefined && !verifyCountersignature(cs, { trustedKeys: authoritySigner, webauthn: opts.webauthn })) reason = "untrusted-key";
+            else if (authorityKey === undefined) reason = "missing-authority-key";
+            else if (!verifyCountersignature(cs, { trustedKeys: authorityKey, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else if (approver) {
-            // A vouched approver's receipt is authority-signed (verifyResolution binds it
-            // to the authority key), so verify it against the dedicated authorityKey when
-            // supplied — not merely the general trustedKeys allowlist.
-            const authoritySigner = opts.authorityKey ?? opts.trustedKeys;
-            if (authoritySigner !== undefined && !verifyCountersignature(cs, { trustedKeys: authoritySigner, webauthn: opts.webauthn })) reason = "untrusted-key";
+            // A vouched approver's receipt is authority-signed — verify it against the
+            // authority key (verifyResolution binds it to exactly that).
+            if (authorityKey === undefined) reason = "missing-authority-key";
+            else if (!verifyCountersignature(cs, { trustedKeys: authorityKey, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else {
             reason = "untrusted-key"; // actor is not an approver of this Intent
           }

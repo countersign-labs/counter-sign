@@ -5,16 +5,14 @@
 // parsing and error-exit behaviour stay identical across every command.
 
 /**
- * The value after `--name` on argv, or undefined if the flag is absent OR its value is
- * missing. A missing value is one where the next token is itself a `--flag` (or argv
- * ends), so `--actor --decision approve` does not silently read "--decision" as the
- * actor. (These CLIs' values — keys, paths, actors, decisions — never start with `--`.)
+ * The value after `--name` on argv (verbatim — base64url ed25519 keys CAN start with
+ * "--", so the value is NOT filtered by prefix), or undefined if the flag is absent or
+ * is the last token. A caller that must distinguish "flag present but valueless" from
+ * "flag absent" uses has() alongside this (e.g. `has("x") && arg("x") === undefined`).
  */
 export function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
-  if (i < 0) return undefined;
-  const value = process.argv[i + 1];
-  return value === undefined || value.startsWith("--") ? undefined : value;
+  return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
 /** True iff the boolean flag `--name` is present. */

@@ -487,6 +487,25 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     }
   });
 
+  it("POST /sign with a literal null body returns 400 (not 500)", async () => {
+    const pending = new PendingDecisions();
+    const { server } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    const resp = await fetch(`${base}/sign`, { method: "POST", headers: { "content-type": "application/json" }, body: "null" });
+    expect(resp.status).toBe(400);
+  });
+
+  it("deliver() after close() is refused", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const i = intentWith([a.approver], 1);
+    const { signer } = makeServer(pending);
+    const adapter = new SigningLinkAdapter({ server: signer, notify: () => {} });
+    adapter.close();
+    await expect(adapter.deliver(i)).rejects.toThrow(/closed/);
+  });
+
   it("refuses to deliver a vouched approver (no key to sign a link with)", async () => {
     const pending = new PendingDecisions();
     const { signer } = makeServer(pending);

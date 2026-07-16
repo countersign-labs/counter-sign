@@ -10,7 +10,7 @@ import { normalizeActor, signDecision } from "../src/core/countersignature.js";
 import { deadline } from "../src/core/defaults.js";
 import { CountersignError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
-import { generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
+import { fromB64url, generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
 import type { Decision, Intent, Resolution } from "../src/core/types.js";
 import { ReceiptLog } from "../src/receipt-log.js";
 import { wrapAction } from "../src/shim.js";
@@ -160,6 +160,28 @@ describe("verifyAll()", () => {
     await log.append(signDecision(stray, "approve", "local:a", authority));
     const r = await log.verifyAll({ intents: [known] });
     expect(r.faults).toEqual([{ index: 1, intent_id: stray.intent_id, actor: "local:a", reason: "unknown-intent" }]);
+  });
+
+  it("faults a FORGED vouched receipt when audited with authorityKey", async () => {
+    // A vouched receipt is authority-signed; verifyResolution binds it to the authority
+    // key, so the audit must reject one signed by a rogue key when authorityKey is given.
+    const i = intent(); // quorum-1 vouched local:a / local:b
+    const rogue = generateKeypair().secretKey;
+    await log.append(signDecision(i, "approve", "local:a", rogue)); // forged, attacker key
+    const r = await log.verifyAll({ intents: [i], authorityKey: authorityPub });
+    expect(r.ok).toBe(false);
+    expect(r.faults.some((f) => f.actor === "local:a" && f.reason === "untrusted-key")).toBe(true);
+  });
+
+  it("rejects a non-canonical authorityKey (alias would dodge the SoD compare)", async () => {
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority));
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const bytes = fromB64url(authorityPub);
+    let alias = "";
+    for (const c of alphabet) { const cand = authorityPub.slice(0, -1) + c; if (cand !== authorityPub && fromB64url(cand).length === 32 && fromB64url(cand).equals(bytes)) { alias = cand; break; } }
+    expect(alias).not.toBe("");
+    await expect(log.verifyAll({ intents: [i], authorityKey: alias })).rejects.toThrow(/canonical/);
   });
 
   it("faults a keyed slot bound to a trusted authority key (audit matches verifyResolution)", async () => {

@@ -227,6 +227,10 @@ export class SigningServer {
     } catch {
       return json(400, { error: "bad body" });
     }
+    // JSON.parse("null") (and "1", "\"s\"", "[]") does NOT throw but is not an object,
+    // so dereferencing body.token below would be an uncaught TypeError → 500. Reject as
+    // a 400 to keep the malformed-input contract.
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json(400, { error: "bad body" });
     const token = verifySigningToken(body.token ?? "", this.authorityPublicKey);
     if (!token || Date.now() >= token.exp) return json(410, { error: "invalid or expired token" });
     if (body.decision !== "approve" && body.decision !== "reject") return json(400, { error: "bad decision" });

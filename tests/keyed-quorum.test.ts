@@ -320,6 +320,23 @@ describe("keyed quorum — negative (a compromised authority key cannot forge it
 });
 
 describe("the approve CLI signs a keyed receipt with the approver's key", () => {
+  it("rejects a present-but-valueless --decision (no silent approve)", () => {
+    const i = keyedIntent(2);
+    const dir = mkdtempSync(join(tmpdir(), "cs-approve-"));
+    const intentPath = join(dir, "intent.json");
+    writeFileSync(intentPath, JSON.stringify(i));
+    try {
+      // --decision is present but has no value (it's the last token) — must NOT fall
+      // through to the "approve" default.
+      execFileSync("npx", ["tsx", "scripts/approve.ts", "--intent", intentPath, "--actor", "m:alice", "--key", alice.secretKey, "--decision"], { encoding: "utf8", stdio: "pipe" });
+      throw new Error("should have exited non-zero");
+    } catch (e) {
+      const err = e as { status?: number; stderr?: string };
+      expect(err.status).toBe(2);
+      expect(String(err.stderr)).toMatch(/--decision requires a value/);
+    }
+  });
+
   it("produces a receipt that verifies as a keyed approval, and refuses a wrong key", () => {
     const i = keyedIntent(2);
     const dir = mkdtempSync(join(tmpdir(), "cs-approve-"));

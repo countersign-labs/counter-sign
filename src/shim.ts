@@ -83,6 +83,10 @@ export function wrapAction<A extends unknown[], R>(
     // assertion the verifier later rejects (a post-approval split-brain). Reconcile:
     // use whichever is supplied, and if BOTH are given they MUST be identical.
     const webauthn = reconcileWebAuthn(opts.webauthn, adapter.webauthn);
+    // Same split-brain, the authority key: if the adapter signs vouched receipts (and the timeout
+    // Default) with a DIFFERENT authority key than this runtime verifies with, the approver is told
+    // "approved" but verifyResolution rejects the receipt afterward. Reconcile before delivering.
+    reconcileAuthority(authority, adapter.authorityPublicKey);
     // Fail fast on configurations that would otherwise be rejected only AFTER a human
     // approves — a split-brain where the approver is told "approved" but the guarded
     // action is silently blocked. Runs before anything is delivered.
@@ -128,6 +132,19 @@ function reconcileWebAuthn(fromOpts?: WebAuthnPolicy, fromAdapter?: WebAuthnPoli
       "wrapAction: the `webauthn` policy in opts differs from the adapter's SigningServer policy — the signer and verifier must use the SAME policy (rpId, allowedOrigins, requireUserVerification), or a valid assertion would be rejected after approval",
     );
   return fromOpts ?? fromAdapter;
+}
+
+/**
+ * The single authority key to sign AND verify authority-signed receipts with. The adapter's signer
+ * and this runtime's verifier (verifyResolution) must agree, or a receipt the adapter signs is
+ * rejected at verification — a post-approval split-brain. If the adapter exposes the authority key it
+ * signs with, it MUST equal the key this runtime verifies with.
+ */
+function reconcileAuthority(authoritySecret: string, adapterAuthorityPublicKey?: string): void {
+  if (adapterAuthorityPublicKey !== undefined && adapterAuthorityPublicKey !== publicKeyFromSecret(authoritySecret))
+    throw new CountersignError(
+      "wrapAction: the adapter signs receipts with a different authority key than opts.authorityKey — the signer and verifier must use the SAME authority key (rotate both together), or a valid receipt would be rejected after approval",
+    );
 }
 
 /**

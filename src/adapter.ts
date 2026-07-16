@@ -27,6 +27,13 @@ export interface Adapter {
    * approval. Absent for adapters that don't serve passkeys.
    */
   readonly webauthn?: WebAuthnPolicy;
+  /**
+   * The authority PUBLIC key this adapter signs vouched receipts (and the timeout Default) with,
+   * if it signs any. Exposed so wrapAction can confirm the runtime verifies with the SAME authority
+   * key the adapter signs with — a divergence would reject a valid receipt AFTER approval (a
+   * post-approval split-brain). Absent for adapters that don't authority-sign (e.g. keyed-only ones).
+   */
+  readonly authorityPublicKey?: string;
   /** Push the Intent to the approver's channel. */
   deliver(intent: Intent): Promise<void>;
   /**

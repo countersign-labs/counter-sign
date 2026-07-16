@@ -91,7 +91,8 @@ export class EmailAdapter implements Adapter {
   private readonly pending = new PendingDecisions();
   private readonly cfg: EmailConfig;
   private readonly transport: Transporter;
-  private readonly authorityPublicKey: string;
+  /** The authority public key this adapter signs vouched receipts with — reconciled by wrapAction. */
+  readonly authorityPublicKey: string;
   /** Intents already decided via a link; every remaining link for them is dead. */
   private readonly decided = new Set<string>();
 

@@ -97,6 +97,37 @@ describe("wrapAction pre-delivery guards (fail fast, no post-approval split-brai
     expect(adapter.delivered).toHaveLength(0);
   });
 
+  it("rejects an adapter whose authority key differs from opts.authorityKey BEFORE delivery", async () => {
+    // The adapter signs vouched receipts with a DIFFERENT authority key than opts.authorityKey (e.g. the
+    // runtime rotated its key but the adapter stayed pinned). Without reconciliation the human approves,
+    // the adapter signs with its key, and verifyResolution then rejects that receipt against opts' key —
+    // a post-approval split-brain. wrapAction must fail fast, like the webauthn-policy reconciliation.
+    const other = generateKeypair();
+    const delivered: Intent[] = [];
+    const adapter: Adapter = {
+      channel: "mock",
+      authorityPublicKey: publicKeyFromSecret(other.secretKey),
+      async deliver(intent) { delivered.push(intent); },
+      awaitResolution: (intent) => Promise.resolve({ decision: "approve", policy: "approver", countersignatures: [signDecision(intent, "approve", "mock:tester", other.secretKey)] }),
+    };
+    const guarded = wrapAction(async () => "ran", fields, adapter, { authorityKey: authority.secretKey });
+    await expect(guarded()).rejects.toThrow(/authority key/i);
+    expect(delivered).toHaveLength(0); // guard fired before deliver()
+  });
+
+  it("delivers when the adapter's exposed authority key MATCHES opts.authorityKey (guard not over-broad)", async () => {
+    const delivered: Intent[] = [];
+    const adapter: Adapter = {
+      channel: "mock",
+      authorityPublicKey: publicKeyFromSecret(authority.secretKey), // same key wrapAction verifies with
+      async deliver(intent) { delivered.push(intent); },
+      awaitResolution: (intent) => Promise.resolve({ decision: "approve", policy: "approver", countersignatures: [signDecision(intent, "approve", "mock:tester", authority.secretKey)] }),
+    };
+    const guarded = wrapAction(async () => "ran", fields, adapter, { authorityKey: authority.secretKey });
+    expect(await guarded()).toBe("ran");
+    expect(delivered).toHaveLength(1);
+  });
+
   it("still delivers a passkey approver WITH a webauthn policy (guard is not over-broad)", async () => {
     // A vouched instantAdapter can't actually serve a keyed approver, but the guard must
     // let it PAST — delivery is what fails here, not the pre-delivery guard.

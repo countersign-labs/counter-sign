@@ -15,7 +15,7 @@ import {
   assertVouchedApprovers,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
-import { hexToBytes, utf8, verifyRaw } from "../core/keys.js";
+import { hexToBytes, publicKeyFromSecret, utf8, verifyRaw } from "../core/keys.js";
 import type { Intent, Resolution } from "../core/types.js";
 
 export interface DiscordConfig {
@@ -45,6 +45,10 @@ export function discordConfigFromEnv(overrides: Partial<DiscordConfig> = {}): Di
  */
 export class DiscordAdapter implements Adapter {
   readonly channel = "discord";
+  /** The authority public key this adapter signs vouched receipts with — reconciled by wrapAction. */
+  get authorityPublicKey(): string {
+    return publicKeyFromSecret(this.cfg.authorityKey);
+  }
   private readonly pending = new PendingDecisions();
   private readonly cfg: DiscordConfig;
 

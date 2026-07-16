@@ -285,6 +285,11 @@ export class ReceiptLog implements ReceiptSink {
    * intact.
    */
   async verifyAll(opts: VerifyAllOptions = {}): Promise<ReceiptLogReport> {
+    // Symmetric to the option empty-array guards below: an empty `intents` array builds an empty
+    // binding map, so every receipt on an honest log faults `unknown-intent` (ok:false) — a false
+    // tamper alarm. Reject the likely mistake rather than silently misreport a clean log.
+    if (opts.intents && opts.intents.length === 0)
+      throw new CountersignError("verifyAll: intents must not be an empty array — omit it to audit without Intent binding, or supply at least one Intent");
     // Normalize the authority key(s) to a canonical set. Each must be canonical, or a
     // keyed slot bound to the canonical authority key slips past the exact-string SoD
     // comparison via a non-canonical alias (base64url is not injective) — the class
@@ -313,11 +318,15 @@ export class ReceiptLog implements ReceiptSink {
     // the auditor asked for never runs and the log gets an integrity-only pass. Throw instead.
     if (opts.trustedAgentKeys && !opts.intents)
       throw new CountersignError("verifyAll: trustedAgentKeys has no effect without `intents` (the agent pin is per-Intent) — omit it or supply intents");
-    // Symmetric to the authorityKey / trustedAgentKeys empty-array guards: an empty trustedKeys makes
-    // the membership check (`[].includes(...)`) always false, so EVERY receipt faults `untrusted-key`
-    // on an honest log. Reject it with a clear error instead of a misleading all-untrusted tamper alarm.
-    if (opts.trustedKeys !== undefined && typeof opts.trustedKeys !== "string" && opts.trustedKeys.length === 0)
-      throw new CountersignError("verifyAll: trustedKeys must not be an empty array — omit it, or supply at least one key");
+    // Reject a trustedKeys with NO usable key — an empty array, an empty string, or all-empty entries
+    // ([], "", [""]) all make the membership check match nothing, faulting every receipt as
+    // untrusted-key on an honest log (the same false alarm the array-only guard closed; "" slipped past
+    // it because `typeof "" === "string"`). authorityKey has no such hole — its "" fails isCanonicalPublicKey.
+    if (opts.trustedKeys !== undefined) {
+      const tk = typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys;
+      if (!tk.some((k) => k !== ""))
+        throw new CountersignError("verifyAll: trustedKeys must not be empty — omit it, or supply at least one (non-empty) key");
+    }
     // An Intent's approver bindings are only a trust anchor if the Intent ITSELF
     // authenticates — otherwise a tampered archived Intent (approver key swapped,
     // signature now invalid) would let a fake receipt signed by the replacement key

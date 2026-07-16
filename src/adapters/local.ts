@@ -8,6 +8,7 @@ import { userInfo } from "node:os";
 import { assertVouchedApprovers, authorityKeyFromEnv, formatIntent, type Adapter } from "../adapter.js";
 import { signDecision } from "../core/countersignature.js";
 import { CountersignError } from "../core/errors.js";
+import { publicKeyFromSecret } from "../core/keys.js";
 import { quorumOf } from "../core/intent.js";
 import type { Intent, Resolution } from "../core/types.js";
 
@@ -23,6 +24,10 @@ import type { Intent, Resolution } from "../core/types.js";
  */
 export class LocalAdapter implements Adapter {
   readonly channel = "local";
+  /** The authority public key this adapter signs vouched receipts with — reconciled by wrapAction. */
+  get authorityPublicKey(): string {
+    return publicKeyFromSecret(this.authorityKey);
+  }
 
   constructor(private readonly authorityKey: string = authorityKeyFromEnv()) {}
 

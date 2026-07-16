@@ -50,6 +50,15 @@ export class SigningLinkAdapter implements Adapter {
   readonly webauthn: WebAuthnPolicy;
   private readonly server: SigningServer;
   private readonly notify: (link: SigningLink) => void | Promise<void>;
+  /**
+   * The resolution promise captured at deliver(), per intent. An approver can decide
+   * WHILE the notify loop is still running — that resolves the wait and evicts the
+   * PendingDecisions entry, so a later `wait()` (idempotent only while the entry is
+   * alive) would mint a fresh, never-resolving promise and lose the real decision.
+   * Caching the promise here lets awaitResolution() return the SAME (possibly already
+   * resolved) promise instead.
+   */
+  private readonly captured = new Map<string, Promise<Resolution>>();
 
   constructor(cfg: SigningLinkAdapterConfig) {
     this.server = cfg.server;
@@ -72,23 +81,42 @@ export class SigningLinkAdapter implements Adapter {
         );
       return { actor: a.actor, url: this.server.signingUrl(intent, a.actor), intent };
     });
-    // Register the collection point BEFORE any link goes out: record() needs the
-    // pending entry to exist, so an approver who taps immediately must not race a
-    // not-yet-registered Intent. wait() is idempotent, so awaitResolution() returns
-    // this very promise. Hold it here only to swallow the rejection cancel() raises
-    // on a delivery failure (nobody awaits it on that path → unhandled rejection).
+    // Register the collection point BEFORE any link goes out (record() needs the
+    // pending entry to exist) and CAPTURE the promise so a decision that lands during
+    // the loop isn't lost when awaitResolution() runs after deliver() returns.
     const pending = this.server.awaitResolution(intent);
-    try {
-      for (const link of links) await this.notify(link);
-    } catch (err) {
-      pending.catch(() => {});
-      this.server.cancel(intent, err instanceof Error ? err : new Error(String(err)));
-      throw err;
+    this.captured.set(intent.intent_id, pending);
+    for (const link of links) {
+      try {
+        await this.notify(link);
+      } catch (err) {
+        // If a decision already landed during delivery, the Intent is resolved and the
+        // failed link is moot — keep `pending` for awaitResolution() and return normally
+        // rather than throwing away a real approval/veto.
+        if (!this.server.isPending(intent)) return;
+        // No decision yet, and this approver can't be reached, so the quorum can never
+        // complete: reclaim the wait (fail closed) and swallow the rejection cancel()
+        // raises here — nobody awaits `pending` on this path.
+        this.captured.delete(intent.intent_id);
+        pending.catch(() => {});
+        this.server.cancel(intent, err instanceof Error ? err : new Error(String(err)));
+        throw err;
+      }
     }
   }
 
   awaitResolution(intent: Intent): Promise<Resolution> {
-    // The idempotent wait() returns the same promise deliver() registered.
-    return this.server.awaitResolution(intent);
+    // Return the promise deliver() captured (it survives a resolve+evict during the
+    // notify loop); fall back to a fresh idempotent wait if awaitResolution is called
+    // without a prior deliver().
+    const p = this.captured.get(intent.intent_id) ?? this.server.awaitResolution(intent);
+    this.captured.delete(intent.intent_id);
+    return p;
+  }
+
+  /** Release in-flight waits on shutdown (matches the messaging adapters' close()). */
+  close(): void {
+    this.captured.clear();
+    this.server.close();
   }
 }

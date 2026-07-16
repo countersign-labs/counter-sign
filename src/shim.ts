@@ -101,13 +101,16 @@ export function wrapAction<A extends unknown[], R>(
   };
 }
 
-/** True iff two WebAuthn policies are equivalent (origin order-insensitive). */
+/** True iff two WebAuthn policies are equivalent (allowed-origins as a SET —
+ *  order- and duplicate-insensitive, so ["a","a"] does not match ["a","b"]). */
 function samePolicy(a: WebAuthnPolicy, b: WebAuthnPolicy): boolean {
+  const oa = new Set(a.allowedOrigins);
+  const ob = new Set(b.allowedOrigins);
   return (
     a.rpId === b.rpId &&
     !!a.requireUserVerification === !!b.requireUserVerification &&
-    a.allowedOrigins.length === b.allowedOrigins.length &&
-    a.allowedOrigins.every((o) => b.allowedOrigins.includes(o))
+    oa.size === ob.size &&
+    [...oa].every((o) => ob.has(o))
   );
 }
 

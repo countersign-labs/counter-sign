@@ -121,6 +121,17 @@ export class SigningServer {
     this.cfg.pending.cancel(intent.intent_id, err);
   }
 
+  /** True while the Intent is still awaiting a decision (not yet resolved/evicted).
+   *  Lets a caller tell a genuine delivery failure from one that raced a decision. */
+  isPending(intent: Intent): boolean {
+    return this.cfg.pending.has(intent.intent_id);
+  }
+
+  /** Release every in-flight wait (graceful shutdown) — rejects awaiting resolutions. */
+  close(): void {
+    this.cfg.pending.abortAll(new Error("signing server closed"));
+  }
+
   /** A per-approver deep-link to the signing page for `actor` (must be a keyed approver). */
   signingUrl(intent: Intent, actor: string): string {
     const approver = intent.approvers.find((a) => normalizeActor(a.actor) === normalizeActor(actor));
@@ -173,8 +184,10 @@ export class SigningServer {
 
   private get(url: URL, res: ServerResponse): void {
     const token = verifySigningToken(url.searchParams.get("token") ?? "", this.authorityPublicKey);
+    // `found` is null unless the token is valid AND unexpired, so the guard needs only
+    // the token + found checks (the expiry is already folded into `found`).
     const found = token && Date.now() < token.exp ? this.resolveApprover(token) : null;
-    if (!token || !found || Date.now() >= token.exp) {
+    if (!token || !found) {
       res.writeHead(410, { "content-type": "text/html; charset=utf-8" }).end(page("This approval link is invalid, expired, or already decided.", ""));
       return;
     }

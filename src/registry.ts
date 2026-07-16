@@ -240,6 +240,23 @@ export class ApproverRegistry {
   isActive(actor: string, publicKey: string): boolean {
     return this.activeKeys(actor).has(publicKey);
   }
+
+  /** All currently-active keys grouped by normalized actor, built in ONE pass over the
+   *  log — so a multi-approver check is O(records + approvers), not O(records × approvers). */
+  activeKeyMap(): Map<string, Set<string>> {
+    const map = new Map<string, Set<string>>();
+    for (const rec of this.records) {
+      const na = normalizeActor(rec.actor);
+      let set = map.get(na);
+      if (!set) {
+        set = new Set<string>();
+        map.set(na, set);
+      }
+      if (rec.typ === "enroll") set.add(rec.public_key);
+      else set.delete(rec.public_key);
+    }
+    return map;
+  }
 }
 
 /**
@@ -287,9 +304,12 @@ export function assertApproversEnrolled(
     );
   if (!registry.verifyChain(orgPublicKey, expectedHead))
     throw new CountersignError("approver registry chain, org signature, or anchored head does not verify");
+  // Build the active-key map once (single log pass) and look each approver up, rather
+  // than rescanning the whole log per approver.
+  const active = registry.activeKeyMap();
   for (const a of intent.approvers) {
     if (a.mode !== "keyed") continue;
-    if (!a.public_key || !registry.isActive(a.actor, a.public_key))
+    if (!a.public_key || !active.get(normalizeActor(a.actor))?.has(a.public_key))
       throw new CountersignError(`keyed approver ${a.actor} is not bound to an active enrollment`);
   }
 }

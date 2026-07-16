@@ -238,6 +238,20 @@ describe("keyed quorum — negative (a compromised authority key cannot forge it
     expect(() => assertIntentInvariants({ ...i, agent: { ...i.agent, public_key: alias } })).toThrow(/canonical/);
   });
 
+  it("createIntent rejects quorum greater than the number of approvers (unsatisfiable)", () => {
+    expect(() =>
+      createIntent(
+        { action: "a", summary: "s", risk_tier: "low", approvers: [keyed("m:alice", alice), keyed("m:bob", bob)], quorum: 3, timeout: 60, default: "reject" },
+        agent,
+      ),
+    ).toThrow(/exceeds the number of approvers|never be reached/);
+  });
+
+  it("createIntent rejects a malformed agent secretKey with CountersignError (not a raw RangeError)", () => {
+    const fields = { action: "a", summary: "s", risk_tier: "low" as const, approvers: [keyed("m:alice", alice)], quorum: 1, timeout: 60, default: "reject" as const };
+    expect(() => createIntent(fields, { id: "a", keypair: { publicKey: generateKeypair().publicKey, secretKey: "abc" } })).toThrow(/not a valid ed25519 secret key/);
+  });
+
   it("createIntent rejects an agent keypair whose public_key does not match its secret", () => {
     const other = generateKeypair();
     const fields = { action: "a", summary: "s", risk_tier: "low" as const, approvers: [keyed("m:alice", alice)], quorum: 1, timeout: 60, default: "reject" as const };

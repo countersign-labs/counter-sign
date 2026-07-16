@@ -79,6 +79,14 @@ function validateApprovers(approvers: Approver[], quorum: number): void {
 }
 
 export function createIntent(fields: IntentFields, agent: AgentIdentity): Intent {
+  // Fail fast at authorship if the agent identity is one downstream verification
+  // would reject — an empty id, or a non-canonical (base64url-aliased) public key.
+  // Otherwise wrapAction would deliver the request and only reject it after the
+  // deadline, stranding approvers with an unusable Intent. Mirrors assertIntentInvariants.
+  if (!agent || typeof agent.id !== "string" || agent.id.length === 0)
+    throw new CountersignError("agent.id must be a non-empty string");
+  if (typeof agent.keypair?.publicKey !== "string" || !isCanonicalPublicKey(agent.keypair.publicKey))
+    throw new CountersignError("agent.keypair.publicKey must be a canonical ed25519 key");
   if (!fields.action) throw new CountersignError("Intent.action is required");
   if (!fields.summary) throw new CountersignError("Intent.summary is required");
   if (!RISK_TIERS.has(fields.risk_tier)) throw new CountersignError(`invalid risk_tier: ${fields.risk_tier}`);

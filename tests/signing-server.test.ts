@@ -189,6 +189,22 @@ describe("SigningServer GET/POST", () => {
     expect((await fetch(url.replace(origin, base))).status).toBe(200);
   });
 
+  it("preserves a base PATH PREFIX in the signing link (proxy-mounted deployment)", () => {
+    const pending = new PendingDecisions();
+    const { approver } = passkeyApprover("m:ceo");
+    const i = intentWith([approver]);
+    // Mounted behind a path prefix — the link must keep "/approvals", not collapse to origin.
+    const signer = new SigningServer({ pending, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin] }, baseUrl: origin + "/approvals" });
+    void signer.awaitResolution(i);
+    const url = signer.signingUrl(i, "m:ceo");
+    expect(url).toContain("/approvals/sign?token=");
+    // A trailing slash on the prefixed base must still not double up.
+    const signer2 = new SigningServer({ pending, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin] }, baseUrl: origin + "/approvals/" });
+    void signer2.awaitResolution(i);
+    expect(signer2.signingUrl(i, "m:ceo")).toContain("/approvals/sign?token=");
+    expect(signer2.signingUrl(i, "m:ceo")).not.toContain("/approvals//sign");
+  });
+
   it("GET with an invalid/expired token shows an error page (410)", async () => {
     const pending = new PendingDecisions();
     const { server } = makeServer(pending);

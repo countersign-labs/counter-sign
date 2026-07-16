@@ -101,19 +101,32 @@ stay with the requesting runtime.
 - An adapter MUST NOT alter, summarize, or re-sign the Intent. What the
   approver sees is derived from the signed envelope.
 
-Adapters use one of two interaction patterns, and MUST use one of these two:
+Adapters use one of three interaction patterns, and MUST use one of these:
 
 1. **Button-webhook** (chat platforms). The Intent is rendered as a message
    with Approve/Reject buttons; the platform delivers the button press to
    the adapter's webhook (or polling loop), which signs the
-   Countersignature.
+   Countersignature. This is a `vouched` decision — the authority signs on the
+   approver's behalf — so adapters using it MUST refuse a `keyed` Intent.
 2. **Signed link-callback** (email and similar). The Intent is rendered with
    Approve/Reject hyperlinks. Each link token MUST be signed, MUST be
    single-use, and MUST expire exactly when the Intent's timeout fires.
    Following a link MUST NOT decide anything: the GET serves a confirmation
    page, and the decision executes only on an explicit confirmation (a POST
    from that page). This keeps mail-scanner prefetch from approving
-   anything.
+   anything. Also a `vouched` pattern (server signs); MUST refuse `keyed`.
+3. **Keyed passkey signing-link** (the `keyed` delivery path — required for a
+   `quorum > 1`, where every approver MUST be keyed). Each keyed approver
+   receives a single-use, signed, timeout-expiring deep-link to a signing page
+   that runs a WebAuthn ceremony; the approver's authenticator signs their OWN
+   receipt (the challenge binds the canonical receipt digest), which is POSTed
+   back and verified against the approver's bound key. The server never holds an
+   approver key and cannot forge the receipt. This is the pattern the shipped
+   `SigningServer` + `SigningLinkAdapter` implement; a raw-key (bot) keyed
+   approver instead signs out of band with the `approve` CLI. Because a
+   vouched-only adapter would silently drop a keyed approver's input (letting the
+   Intent fall to its Default with no usable veto), the button-webhook and
+   link-callback adapters MUST refuse a `keyed` Intent rather than deliver it.
 
 A Countersignature MUST be identical in shape and equally verifiable
 regardless of which interaction pattern produced it. Consumers of receipts
@@ -236,8 +249,11 @@ the Default fires.
   authentication (e.g. Slack request signatures, Discord interaction
   signatures, Meta hub signatures) before trusting any callback.
 - **Key custody.** Agent keys and authority keys are distinct roles and
-  SHOULD be distinct keys; compromise of an agent key forges requests,
-  compromise of an authority key forges authority.
+  MUST be distinct keys; compromise of an agent key forges requests,
+  compromise of an authority key forges authority. If they were the same key, a
+  holder could both mint an Intent binding approver keys it controls and sign
+  every keyed slot — forging an entire quorum. `verifyResolution` therefore
+  rejects any resolution whose Intent was authored by the authority key.
 
 ## 6. Versioning
 
@@ -255,7 +271,11 @@ each approver's own bound key, with a raw-ed25519 signer; (2) human passkey /
 WebAuthn signing via a deep-linked signing page; and (3) an org-root-attested,
 hash-chained **enrollment registry** (`ApproverRegistry`) that anchors each
 `actor → key` binding, with proof-of-possession, revocation, and a strict
-`assertApproversEnrolled` check.
+`assertApproversEnrolled` check. Proof-of-possession is required for **every**
+enrolled key before the org root attests it — a raw ed25519 key via the
+approver's own signature over their `actor → key`, and a passkey via a WebAuthn
+assertion over an actor/key-bound enrollment challenge — so a compromised
+enrollment intermediary cannot have a substituted credential attested.
 
 One hardening item remains explicitly **planned**: a **keyed, self-anchoring
 receipt log** — a signed head per append so an append-only audit trail is

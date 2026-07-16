@@ -171,6 +171,40 @@ describe("keyed quorum — negative (a compromised authority key cannot forge it
     ).toThrow(/shares key material/);
   });
 
+  it("rejects a resolution whose Intent was AUTHORED by the authority key (agent == authority)", () => {
+    // If the agent key that signs Intents is the authority key, a holder of that
+    // one secret mints an Intent binding approver keys it controls and signs every
+    // slot — a full quorum forge. verifyResolution has both keys and must refuse.
+    const i = createIntent(
+      { action: "prod.deploy", summary: "s", risk_tier: "critical",
+        approvers: [keyed("m:alice", alice), keyed("m:bob", bob)], quorum: 2, timeout: 300, default: "reject" },
+      { id: "agent:evil", keypair: authority }, // agent keypair == authority keypair
+    );
+    const r = res("approve", [
+      signDecision(i, "approve", "m:alice", alice.secretKey, "approver"),
+      signDecision(i, "approve", "m:bob", bob.secretKey, "approver"),
+    ]);
+    expect(() => verifyResolution(i, r, authPub)).toThrow(/agent and .*authority keys must be distinct|authored by the authority key/);
+  });
+
+  it("rejects a non-canonical expected authority public key (alias bypass)", () => {
+    const i = keyedIntent(2);
+    const r = res("approve", [
+      signDecision(i, "approve", "m:alice", alice.secretKey, "approver"),
+      signDecision(i, "approve", "m:bob", bob.secretKey, "approver"),
+    ]);
+    // A base64url alias of authPub that decodes to the same key but is non-canonical.
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const bytes = fromB64url(authPub);
+    let twin = "";
+    for (const c of alphabet) {
+      const cand = authPub.slice(0, -1) + c;
+      if (cand !== authPub && fromB64url(cand).length === 32 && fromB64url(cand).equals(bytes)) { twin = cand; break; }
+    }
+    expect(twin).not.toBe("");
+    expect(() => verifyResolution(i, r, twin)).toThrow(/canonical/);
+  });
+
   it("refuses two approvers that normalize to the same actor", () => {
     expect(() =>
       createIntent(

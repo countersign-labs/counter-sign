@@ -23,11 +23,18 @@ export {
   type SigningServerConfig,
 } from "./signing.js";
 export {
+  SigningLinkAdapter,
+  type SigningLink,
+  type SigningLinkAdapterConfig,
+} from "./adapters/signing-link.js";
+export {
   ApproverRegistry,
   createEnrollmentProof,
+  enrollmentChallenge,
   assertApproversEnrolled,
   type EnrollmentRecord,
   type RegistryHead,
+  type PasskeyEnrollmentProof,
 } from "./registry.js";
 export {
   ReceiptLog,

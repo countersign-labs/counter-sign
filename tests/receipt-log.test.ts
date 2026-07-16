@@ -160,6 +160,36 @@ describe("verifyAll()", () => {
     const r = await log.verifyAll({ intents: [known] });
     expect(r.faults).toEqual([{ index: 1, intent_id: stray.intent_id, actor: "local:a", reason: "unknown-intent" }]);
   });
+
+  it("does NOT trust a TAMPERED Intent's approver binding (fake receipt via a swapped key)", async () => {
+    const i = intent(2); // keyed local:a / local:b with distinct keys
+    const evil = generateKeypair();
+    // The attacker's receipt for local:a, signed by a key THEY control.
+    await log.append(signDecision(i, "approve", "local:a", evil.secretKey, "approver"));
+    // …then edits the archived Intent to bind local:a -> evil's key. This
+    // invalidates the Intent's agent signature; a naive verifier would still read
+    // the swapped binding as the trust anchor and report the fake receipt valid.
+    const tampered: Intent = {
+      ...i,
+      approvers: i.approvers.map((a) =>
+        normalizeActor(a.actor) === normalizeActor("local:a") ? { ...a, public_key: evil.publicKey } : a,
+      ),
+    };
+    const r = await log.verifyAll({ intents: [tampered] });
+    expect(r.ok).toBe(false);
+    expect(r.faults.some((f) => f.actor === "local:a" && f.reason === "unverified-intent")).toBe(true);
+  });
+
+  it("with trustedAgentKeys, ignores an Intent signed by an unpinned agent", async () => {
+    const i = intent(2);
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
+    // The Intent verifies under its own agent key, but we pin a DIFFERENT agent.
+    const r = await log.verifyAll({ intents: [i], trustedAgentKeys: [generateKeypair().publicKey] });
+    expect(r.faults.some((f) => f.reason === "unverified-intent")).toBe(true);
+    // Pinning the correct agent key trusts the binding again.
+    const ok = await log.verifyAll({ intents: [i], trustedAgentKeys: [agent.keypair.publicKey] });
+    expect(ok.ok).toBe(true);
+  });
 });
 
 describe("corruption is loud", () => {

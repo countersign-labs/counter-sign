@@ -8,6 +8,7 @@ import { dirname } from "node:path";
 import { canonicalize } from "./core/canonical.js";
 import { normalizeActor, verifyCountersignature, type VerifyOptions } from "./core/countersignature.js";
 import { DEFAULT_TIMEOUT_ACTOR } from "./core/defaults.js";
+import { assertIntentInvariants, verifyIntent } from "./core/intent.js";
 import { CountersignError } from "./core/errors.js";
 import { toB64url } from "./core/keys.js";
 import type { Countersignature, Intent, Resolution } from "./core/types.js";
@@ -66,7 +67,7 @@ export interface ReceiptFault {
   index: number;
   intent_id: string;
   actor: string;
-  reason: "invalid-signature" | "untrusted-key" | "unknown-intent" | "malformed";
+  reason: "invalid-signature" | "untrusted-key" | "unknown-intent" | "unverified-intent" | "malformed";
 }
 
 /** The result of re-verifying an entire ReceiptLog. */
@@ -87,6 +88,13 @@ export interface VerifyAllOptions extends VerifyOptions {
    * binding a receipt to its Intent; a receipt for an unknown Intent is faulted.
    */
   intents?: readonly Intent[];
+  /**
+   * Optional allowlist of agent public keys whose Intents you trust. When set, a
+   * supplied Intent is only used for its approver bindings if its agent key is in
+   * this set — so an attacker cannot slip in a self-consistent Intent signed by an
+   * agent key you never authorized. Independent of the Intent's own signature check.
+   */
+  trustedAgentKeys?: readonly string[];
   /**
    * A chain head captured earlier (see `head()`). Anchoring it externally is
    * how you detect *tail truncation*: a forward chain alone cannot tell that
@@ -264,7 +272,29 @@ export class ReceiptLog implements ReceiptSink {
    * intact.
    */
   async verifyAll(opts: VerifyAllOptions = {}): Promise<ReceiptLogReport> {
-    const intentsById = opts.intents ? new Map(opts.intents.map((i) => [i.intent_id, i])) : undefined;
+    // An Intent's approver bindings are only a trust anchor if the Intent ITSELF
+    // authenticates — otherwise a tampered archived Intent (approver key swapped,
+    // signature now invalid) would let a fake receipt signed by the replacement key
+    // read as valid. Keep only Intents whose invariants hold AND whose agent
+    // signature verifies (and, if pinned, whose agent key is trusted). A supplied
+    // Intent that fails is dropped so its receipts fault as `unverified-intent`
+    // rather than being checked against attacker-chosen bindings.
+    let intentsById: Map<string, Intent> | undefined;
+    const unverifiedIntentIds = new Set<string>();
+    if (opts.intents) {
+      intentsById = new Map();
+      for (const i of opts.intents) {
+        let authentic = false;
+        try {
+          assertIntentInvariants(i);
+          authentic = verifyIntent(i) && (!opts.trustedAgentKeys || opts.trustedAgentKeys.includes(i.agent?.public_key));
+        } catch {
+          authentic = false;
+        }
+        if (authentic) intentsById.set(i.intent_id, i);
+        else if (typeof i?.intent_id === "string") unverifiedIntentIds.add(i.intent_id);
+      }
+    }
     const lines = await this.parseLines();
     const chain = walkChain(lines, opts.expectedHead);
     const faults: ReceiptFault[] = [];
@@ -285,7 +315,9 @@ export class ReceiptLog implements ReceiptSink {
       else {
         const intent = intentsById?.get(cs.intent_id);
         if (intentsById && !intent) {
-          reason = "unknown-intent";
+          // A receipt whose Intent was supplied but did NOT authenticate faults as
+          // `unverified-intent`; one whose Intent was never supplied is `unknown-intent`.
+          reason = unverifiedIntentIds.has(cs.intent_id) ? "unverified-intent" : "unknown-intent";
         } else if (intent) {
           // (2) Bind the receipt to the Intent's approver — a KEYED receipt must be
           // signed by THAT actor's own bound key, not merely a globally-trusted key

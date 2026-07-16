@@ -19,7 +19,7 @@
 //   tsx scripts/enroll.ts --registry reg.jsonl --actor slack:U024BE7LH \
 //       --public-key <key> --org-key <org-root-secret> --revoke
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { ApproverRegistry, createEnrollmentProof, type PasskeyEnrollmentProof } from "../src/registry.js";
 import { isWebAuthnCredential } from "../src/core/webauthn.js";
 import { publicKeyFromSecret } from "../src/core/keys.js";
@@ -99,7 +99,13 @@ try {
   const rec = has("revoke")
     ? registry.revoke(actor!, publicKey, orgKey!)
     : registry.enroll(actor!, publicKey, orgKey!, { pop, webauthnPop });
-  writeFileSync(registryPath!, registry.toJSONL());
+  // APPEND exactly the one new record line (same JSON.stringify serialization as toJSONL)
+  // instead of rewriting the whole file. The registry is append-only JSONL; a full rewrite
+  // meant a concurrent enroll/revoke was last-writer-wins — the loser's record (e.g. a
+  // REVOKE) vanished while the surviving file still verified. With appends, a concurrent
+  // write at worst forks the hash chain, which verifyChain REPORTS instead of hiding, and
+  // a crash mid-write truncates only the tail line, which fromJSONL rejects loudly.
+  appendFileSync(registryPath!, JSON.stringify(rec) + "\n");
   // The chain was verified under --org-key before appending (line ~51) and enroll/revoke maintain it,
   // so it is intact by construction — no need to re-walk and re-verify every record's signature here
   // (O(records) crypto) just to print a status word.

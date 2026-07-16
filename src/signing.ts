@@ -16,7 +16,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { PendingDecisions, readBody } from "./adapter.js";
+import { escapeHtml, PendingDecisions, readBody } from "./adapter.js";
 import { canonicalize } from "./core/canonical.js";
 import { fromB64url, publicKeyFromSecret, signContext, toB64url, utf8, verifyContext } from "./core/keys.js";
 import { normalizeActor } from "./core/countersignature.js";
@@ -73,10 +73,6 @@ function unsignedReceipt(intentId: string, decision: "approve" | "reject", actor
 }
 function challengeFor(unsigned: object): string {
   return toB64url(createHash("sha256").update(utf8(`${COUNTERSIGNATURE_CONTEXT}\n${canonicalize(unsigned)}`)).digest());
-}
-
-function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
 /**
@@ -284,7 +280,7 @@ export class SigningServer {
 
 /** The self-contained signing page. `dataJson` seeds the WebAuthn ceremony. */
 function page(errorMessage: string | null, dataJson: string, nonce = ""): string {
-  if (errorMessage) return `<!doctype html><meta charset=utf-8><title>counter-sign</title><body style="font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem"><h1>counter-sign</h1><p>${esc(errorMessage)}</p></body>`;
+  if (errorMessage) return `<!doctype html><meta charset=utf-8><title>counter-sign</title><body style="font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem"><h1>counter-sign</h1><p>${escapeHtml(errorMessage)}</p></body>`;
   // Inline, no external resources (matches the repo's no-CDN posture).
   return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Approve — counter-sign</title>
 <body style="font-family:system-ui;max-width:32rem;margin:3rem auto;padding:0 1rem;line-height:1.5">
@@ -296,7 +292,7 @@ function page(errorMessage: string | null, dataJson: string, nonce = ""): string
   <button id=reject style="flex:1;padding:.7rem;border:0;border-radius:.5rem;background:#b3261e;color:#fff;font-size:1rem">Reject</button>
 </div>
 <p id=status style="margin-top:1rem;min-height:1.5rem"></p>
-<script nonce="${esc(nonce)}">
+<script nonce="${escapeHtml(nonce)}">
 const D = ${dataJson};
 const token = new URLSearchParams(location.search).get("token");
 const b64urlToBytes = s => Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/").padEnd(Math.ceil(s.length/4)*4,"=")), c=>c.charCodeAt(0));

@@ -8,6 +8,15 @@ export const COUNTERSIGN_VERSION = "0.2" as const;
  * Signature domain-separation contexts. Each artifact type signs under a
  * distinct label so a signature is only ever valid for the artifact it was
  * minted for. Bump alongside COUNTERSIGN_VERSION on any wire-format change.
+ *
+ * v0.2 is a DELIBERATE compatibility break: the v0.1 contexts are gone, so
+ * artifacts signed under v0.1 do NOT verify here — they fault/reject loudly
+ * (never read as silently valid). This is intended, not an oversight: v0.1's
+ * integrity-only receipts predate per-approver keys and separation of duty, so
+ * a compromised authority server could forge them; a v0.2 verifier that also
+ * accepted v0.1 signatures would launder that weakness through a verifier
+ * users trust as v0.2-strong. Audit v0.1 archives with a v0.1 install; sign
+ * everything new under v0.2.
  */
 export const INTENT_CONTEXT = "countersign-intent-v0.2" as const;
 export const COUNTERSIGNATURE_CONTEXT = "countersign-countersignature-v0.2" as const;

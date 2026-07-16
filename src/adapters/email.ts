@@ -6,6 +6,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import nodemailer, { type Transporter } from "nodemailer";
 import {
   authorityKeyFromEnv,
+  escapeHtml,
   formatIntent,
   readBody,
   requireEnv,
@@ -93,8 +94,14 @@ export class EmailAdapter implements Adapter {
   private readonly transport: Transporter;
   /** The authority public key this adapter signs vouched receipts with — reconciled by wrapAction. */
   readonly authorityPublicKey: string;
-  /** Intents already decided via a link; every remaining link for them is dead. */
-  private readonly decided = new Set<string>();
+  /**
+   * intent_id -> link expiry (ms) for intents already decided via a link; every remaining
+   * link for them is dead. Entries are pruned once their expiry passes — an expired link is
+   * rejected upstream by the expiry check before this map is ever consulted, so keeping the
+   * entry past its deadline only leaks memory on a long-running callback server (mirrors
+   * SigningServer's consumed-link pruning).
+   */
+  private readonly decided = new Map<string, number>();
 
   constructor(config: Partial<EmailConfig> = {}) {
     this.cfg = emailConfigFromEnv(config);
@@ -182,8 +189,28 @@ export class EmailAdapter implements Adapter {
             return;
           }
           const { payload } = check;
-          this.decided.add(payload.intent_id);
-          this.pending.settle(payload.intent_id, payload.decision, `email:${this.cfg.to}`, this.cfg.authorityKey);
+          const result = this.pending.settle(payload.intent_id, payload.decision, `email:${this.cfg.to}`, this.cfg.authorityKey);
+          if (!result) {
+            // settle() recorded NOTHING — this mailbox is not a named approver of the
+            // Intent, or it resolved/expired between checkToken and settle. Say so
+            // honestly and do NOT burn the links: claiming "a Countersignature has been
+            // issued" here would tell a human "approved" while the Intent silently
+            // falls to its timeout Default.
+            page(
+              res,
+              409,
+              "Decision not recorded",
+              `This decision could not be recorded — this mailbox (<code>${escapeHtml(`email:${this.cfg.to}`)}</code>) ` +
+                `is not a named approver of the intent, or the intent is no longer pending. ` +
+                `<strong>No Countersignature was issued.</strong>`,
+            );
+            return;
+          }
+          // Burn the links only AFTER a real settle — single-use applies to a decision
+          // that actually happened. Prune expired entries first so the map cannot grow
+          // without bound.
+          this.pruneDecided(Date.now());
+          this.decided.set(payload.intent_id, payload.exp);
           page(
             res,
             200,
@@ -214,6 +241,12 @@ export class EmailAdapter implements Adapter {
     return { ok: true, payload };
   }
 
+  /** Drop decided-intent entries whose links have already expired: an expired link is
+   *  rejected upstream (no replay is possible), so retaining them only leaks memory. */
+  private pruneDecided(now: number): void {
+    for (const [id, exp] of this.decided) if (now >= exp) this.decided.delete(id);
+  }
+
   createServer(): Server {
     return createServer(this.handleRequest());
   }
@@ -233,6 +266,3 @@ function page(res: ServerResponse, status: number, title: string, bodyHtml: stri
   );
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}

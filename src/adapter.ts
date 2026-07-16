@@ -331,6 +331,16 @@ export function decisionPayload(intent: Intent, decision: Decision): string {
   return `cs:${intent.intent_id}:${decision}`;
 }
 
+/**
+ * The ONE strict HTML escaper for every adapter-facing page (escapes & < > " ').
+ * Security-relevant: keep a single copy — two escapers drift (one grew the
+ * single-quote escape, the other didn't), and a hardening fix applied to one
+ * silently misses the other.
+ */
+export function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
 /** Human-readable rendering of an Intent for chat messages and emails. */
 export function formatIntent(intent: Intent): string {
   const quorum = quorumOf(intent);

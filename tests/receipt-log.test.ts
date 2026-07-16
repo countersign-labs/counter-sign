@@ -444,6 +444,27 @@ describe("verifyAll()", () => {
     await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
     await expect(log.verifyAll({ trustedAgentKeys: [agent.keypair.publicKey] })).rejects.toThrow(/trustedAgentKeys has no effect without|without `intents`/);
   });
+
+  it("treats a keyed approver's raw key and its webauthn-ed25519 descriptor as ONE identity in the trustedKeys gate", async () => {
+    // The keyed-slot==authority check normalizes via credentialKeyMaterial (raw K ≡ webauthn-ed25519:K),
+    // so the ADDITIONAL trustedKeys allowlist must too — else an auditor who holds the key in the other
+    // equivalent encoding false-faults an honest log. Here a raw-ed25519 keyed approver's key is given
+    // to trustedKeys in DESCRIPTOR form; it must still pass, not fault untrusted-key.
+    const i = intent(2); // raw-ed25519 keyed local:a / local:b
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
+    const descriptorForm = [`webauthn-ed25519:${keyOf("local:a").publicKey}`, `webauthn-ed25519:${keyOf("local:b").publicKey}`];
+    const r = await log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedKeys: descriptorForm });
+    expect(r.faults).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+
+  it("throws on an EMPTY trustedKeys array (would silently fault every keyed receipt)", async () => {
+    // Symmetric to the authorityKey / trustedAgentKeys empty-array guards: verifyCountersignature([])
+    // is always false, so an empty allowlist faults every receipt as untrusted-key on an honest log.
+    const i = intent(2);
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
+    await expect(log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedKeys: [] })).rejects.toThrow(/trustedKeys must not be an empty array|at least one key/);
+  });
 });
 
 describe("corruption is loud", () => {

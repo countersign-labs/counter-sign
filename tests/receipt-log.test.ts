@@ -180,6 +180,23 @@ describe("verifyAll()", () => {
     await expect(log.verifyAll({ authorityKey: authorityPub })).rejects.toThrow(/without `intents`|no effect/);
   });
 
+  it("throws on an EMPTY authorityKey array (would vacuously disable the SoD checks)", async () => {
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority));
+    await expect(log.verifyAll({ intents: [i], authorityKey: [] })).rejects.toThrow(/empty array|at least one/);
+  });
+
+  it("classifies a passkey receipt with a MISSING webauthn block as invalid-signature (not missing-policy)", async () => {
+    const i = intent();
+    // A valid passkey DESCRIPTOR but no assertion block (structural corruption) — detectable
+    // without the RP policy, so it must not read as a mere config omission.
+    const bad = { ...signDecision(i, "approve", "local:a", authority), public_key: `webauthn-ed25519:${authorityPub}` };
+    await log.append(bad);
+    const r = await log.verifyAll({ intents: [i] }); // no webauthn policy
+    expect(r.faults.some((f) => f.reason === "invalid-signature")).toBe(true);
+    expect(r.faults.some((f) => f.reason === "missing-webauthn-policy")).toBe(false);
+  });
+
   it("faults a vouched/Default receipt as missing-authority-key when authorityKey is omitted", async () => {
     // An authority-signed receipt cannot be verified without the authority key, so the
     // audit reports it honestly (not silently valid, not a tamper alarm).

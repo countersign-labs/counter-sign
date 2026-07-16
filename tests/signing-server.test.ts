@@ -472,6 +472,16 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     await expect(adapter.deliver(i)).resolves.toBeUndefined(); // partial is safe under reject-Default
   });
 
+  it("does NOT hang on a notify that never settles (races the deadline, fails closed)", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:a");
+    // Short timeout so the deadline race resolves fast.
+    const i = createIntent({ action: "a", summary: "s", risk_tier: "low", approvers: [a.approver], quorum: 1, timeout: 1, default: "reject" }, agent);
+    const { signer } = makeServer(pending);
+    const adapter = new SigningLinkAdapter({ server: signer, notify: () => new Promise<void>(() => {}) }); // never settles
+    await expect(adapter.deliver(i)).rejects.toThrow(); // completes (~1s), fails closed (nothing delivered)
+  }, 6000);
+
   it("fails closed only when NO approver could be reached", async () => {
     const pending = new PendingDecisions();
     const a = passkeyApprover("m:a");

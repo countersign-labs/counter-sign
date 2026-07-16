@@ -293,6 +293,11 @@ export class ReceiptLog implements ReceiptSink {
     // would be a silent no-op — throw instead of misleading the auditor.
     const authorityKeys = opts.authorityKey === undefined ? undefined : typeof opts.authorityKey === "string" ? [opts.authorityKey] : [...opts.authorityKey];
     if (authorityKeys) {
+      // An EMPTY array would pass `every` vacuously and be truthy, silently disabling the
+      // agent!=authority and keyed-slot!=authority checks (`includes` on [] is always
+      // false) — the opposite of the advertised anchor. Reject it.
+      if (authorityKeys.length === 0)
+        throw new CountersignError("verifyAll: authorityKey must not be an empty array — omit it, or supply at least one key");
       if (!authorityKeys.every(isCanonicalPublicKey))
         throw new CountersignError("verifyAll: authorityKey contains a non-canonical ed25519 key");
       if (!opts.intents)
@@ -348,10 +353,15 @@ export class ReceiptLog implements ReceiptSink {
       // to pass `webauthn` doesn't read as a tamper alarm on untampered receipts.
       // A MALFORMED passkey descriptor (right prefix, corrupt/non-canonical key bytes) is
       // detectable WITHOUT the RP policy — that's a signature/structural fault, not a
-      // missing-policy one. Only a structurally-VALID passkey descriptor with no policy
-      // supplied is the honest "can't verify without policy" case.
-      if (isWebAuthnCredential(cs.public_key) && !isValidCredentialDescriptor(cs.public_key)) reason = "invalid-signature";
-      else if (isWebAuthnCredential(cs.public_key) && !opts.webauthn) reason = "missing-webauthn-policy";
+      // missing-policy one. Likewise a MISSING or malformed `webauthn` assertion block on
+      // a passkey receipt is structural corruption detectable without the policy. Only a
+      // STRUCTURALLY COMPLETE passkey receipt (valid descriptor + present assertion block)
+      // that merely can't be cryptographically verified without the policy is the honest
+      // "missing-webauthn-policy" case.
+      const isPasskey = isWebAuthnCredential(cs.public_key);
+      const hasWebAuthnBlock = !!cs.webauthn && typeof cs.webauthn.authenticator_data === "string" && typeof cs.webauthn.client_data_json === "string";
+      if (isPasskey && (!isValidCredentialDescriptor(cs.public_key) || !hasWebAuthnBlock)) reason = "invalid-signature";
+      else if (isPasskey && !opts.webauthn) reason = "missing-webauthn-policy";
       else if (!verifyCountersignature(cs, { webauthn: opts.webauthn })) reason = "invalid-signature";
       else {
         const intent = intentsById?.get(cs.intent_id);

@@ -6,7 +6,7 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -245,6 +245,27 @@ describe("the enroll CLI", () => {
       const err = e as { status?: number; stderr?: string };
       expect(err.status).toBe(2); // clean die(), not an uncaught-exception crash
       expect(String(err.stderr)).toMatch(/not a valid ed25519 secret key/);
+      expect(String(err.stderr)).not.toMatch(/\bat .*:\d+:\d+\)/); // no stack-trace frames
+    }
+  });
+
+  it("exits cleanly (die, exit 2) when --webauthn-pop is the JSON literal `null` — no null-deref crash", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cs-reg-"));
+    const path = join(dir, "reg.jsonl");
+    const popFile = join(dir, "pop.json");
+    writeFileSync(popFile, "null"); // JSON.parse("null") === null and does NOT throw
+    try {
+      execFileSync(
+        "npx",
+        ["tsx", "scripts/enroll.ts", "--registry", path, "--actor", "slack:U1", "--public-key", `webauthn-ed25519:${alice.publicKey}`, "--org-key", org.secretKey, "--webauthn-pop", popFile, "--rp-id", "approve.example.com", "--origin", "https://approve.example.com"],
+        { encoding: "utf8", stdio: "pipe" },
+      );
+      throw new Error("should have exited non-zero");
+    } catch (e) {
+      const err = e as { status?: number; stderr?: string };
+      expect(err.status).toBe(2); // clean die(), not an uncaught TypeError crash (exit 1)
+      expect(String(err.stderr)).toMatch(/authenticator_data, client_data_json, and signature/);
+      expect(String(err.stderr)).not.toMatch(/Cannot read properties of null/);
       expect(String(err.stderr)).not.toMatch(/\bat .*:\d+:\d+\)/); // no stack-trace frames
     }
   });

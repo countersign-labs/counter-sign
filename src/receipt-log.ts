@@ -367,6 +367,13 @@ export class ReceiptLog implements ReceiptSink {
         } else if (typeof i?.intent_id === "string") unverifiedIntentIds.add(i.intent_id);
       }
     }
+    // Precompute the normalized trusted-key material ONCE (same credentialKeyMaterial normalization the
+    // keyed gate uses), so the per-receipt keyed trustedKeys check is an O(1) Set lookup rather than
+    // re-normalizing the whole allowlist for every receipt (O(receipts × trustedKeys)).
+    const trustedMaterials =
+      opts.trustedKeys === undefined
+        ? undefined
+        : new Set((typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys).map(credentialKeyMaterial));
     const lines = await this.parseLines();
     const chain = walkChain(lines, opts.expectedHead);
     const faults: ReceiptFault[] = [];
@@ -462,11 +469,8 @@ export class ReceiptLog implements ReceiptSink {
           // a literal-descriptor match would false-fault an auditor who listed the other equivalent form.
           // It must NOT gate authority-signed vouched approvals or the timeout Default (those are anchored
           // by the dedicated authorityKey; trustedKeys legitimately holds only approver keys).
-          if (reason === undefined && approver?.mode === "keyed" && opts.trustedKeys !== undefined) {
-            const trusted = typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys;
-            const material = credentialKeyMaterial(cs.public_key);
-            if (!trusted.some((k) => credentialKeyMaterial(k) === material)) reason = "untrusted-key";
-          }
+          if (reason === undefined && approver?.mode === "keyed" && trustedMaterials !== undefined && !trustedMaterials.has(credentialKeyMaterial(cs.public_key)))
+            reason = "untrusted-key";
         } else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) {
           // No Intents supplied → fall back to the global trusted-set check.
           reason = "untrusted-key";

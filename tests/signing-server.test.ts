@@ -172,6 +172,23 @@ describe("SigningServer GET/POST", () => {
     expect(html).toContain('D.requireUserVerification ? "required" : "preferred"');
   });
 
+  it("builds a working /sign link even when baseUrl has a trailing slash", async () => {
+    const pending = new PendingDecisions();
+    const { approver } = passkeyApprover("m:ceo");
+    const i = intentWith([approver]);
+    // baseUrl deliberately ends in "/" — a naive concat would produce "//sign" (404).
+    const signer = new SigningServer({ pending, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin] }, baseUrl: origin + "/" });
+    const server = createServer(signer.handler());
+    servers.push(server);
+    const base = await listen(server);
+    void signer.awaitResolution(i);
+    const url = signer.signingUrl(i, "m:ceo");
+    expect(url).toContain("/sign?token=");
+    expect(url).not.toContain("//sign");
+    // …and it resolves to the page, not a 404.
+    expect((await fetch(url.replace(origin, base))).status).toBe(200);
+  });
+
   it("GET with an invalid/expired token shows an error page (410)", async () => {
     const pending = new PendingDecisions();
     const { server } = makeServer(pending);

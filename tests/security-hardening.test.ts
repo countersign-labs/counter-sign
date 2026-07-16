@@ -12,7 +12,7 @@ import { awaitWithDefault, deadline, defaultResolution, verifyResolution } from 
 import { wrapAction } from "../src/shim.js";
 import { InvalidCountersignatureError } from "../src/core/errors.js";
 import { createIntent } from "../src/core/intent.js";
-import { generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
+import { fromB64url, generateKeypair, publicKeyFromSecret, type Keypair } from "../src/core/keys.js";
 import type { Approver, Intent, Resolution } from "../src/core/types.js";
 import { LocalAdapter } from "../src/adapters/local.js";
 import { TelegramAdapter } from "../src/adapters/telegram.js";
@@ -598,6 +598,29 @@ describe("adapter faults and contradictory Defaults fail closed, never approve (
       const bad = { ...intent(1, { default: "approve" }), created_at: "+275760-09-13T00:00:00.000Z" };
       await expect(awaitWithDefault(bad, Promise.reject(new Error("route failed")), authority.secretKey)).rejects.toThrow();
       await new Promise((r) => setTimeout(r, 30)); // let any unhandled rejection surface
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRej);
+    }
+  });
+
+  it("a malformed-agent Intent with a REJECTING adapter fails closed with NO unhandled rejection", async () => {
+    // assertIntentInvariants now throws on a non-canonical agent key; if it throws
+    // before awaitWithDefault installs its adapter-promise safety catch, the rejecting
+    // adapter is orphaned → unhandled rejection → crash. The catch must come FIRST.
+    const rejections: unknown[] = [];
+    const onRej = (e: unknown) => rejections.push(e);
+    process.on("unhandledRejection", onRej);
+    try {
+      const good = intent(1, { default: "reject" });
+      const bytes = fromB64url(good.agent.public_key);
+      const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+      let alias = "";
+      for (const c of alphabet) { const cand = good.agent.public_key.slice(0, -1) + c; if (cand !== good.agent.public_key && fromB64url(cand).length === 32 && fromB64url(cand).equals(bytes)) { alias = cand; break; } }
+      expect(alias).not.toBe("");
+      const bad = { ...good, agent: { ...good.agent, public_key: alias } };
+      await expect(awaitWithDefault(bad, Promise.reject(new Error("route failed")), authority.secretKey)).rejects.toThrow(/canonical/);
+      await new Promise((r) => setTimeout(r, 30)); // let any orphaned rejection surface
       expect(rejections).toEqual([]);
     } finally {
       process.off("unhandledRejection", onRej);

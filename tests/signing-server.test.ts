@@ -189,20 +189,48 @@ describe("SigningServer GET/POST", () => {
     expect((await fetch(url.replace(origin, base))).status).toBe(200);
   });
 
-  it("preserves a base PATH PREFIX in the signing link (proxy-mounted deployment)", () => {
+  it("completes a passkey decision end-to-end under a base PATH PREFIX (link, GET, and POSTs all agree)", async () => {
+    const pending = new PendingDecisions();
+    const { approver, sign } = passkeyApprover("m:ceo");
+    const i = intentWith([approver]);
+    // Mounted behind a path prefix — link, handler route, and page POSTs must all use it.
+    const signer = new SigningServer({ pending, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin] }, baseUrl: origin + "/approvals" });
+    const server = createServer(signer.handler());
+    servers.push(server);
+    const base = await listen(server);
+    const resolution = signer.awaitResolution(i);
+
+    const url = signer.signingUrl(i, "m:ceo");
+    expect(url).toContain("/approvals/sign?token="); // prefix preserved in the link
+    const path = new URL(url).pathname; // "/approvals/sign"
+    const token = new URL(url).searchParams.get("token");
+
+    // GET the page at the prefixed path (the handler must match "*/sign", not just "/sign").
+    const pageResp = await fetch(`${base}${path}?token=${encodeURIComponent(token!)}`);
+    expect(pageResp.status).toBe(200);
+    const html = await pageResp.text();
+    expect(html).toContain("Deploy 2.4.0 to production");
+    // The page POSTs back to its own path, not the origin root.
+    expect(html).toContain("fetch(location.pathname");
+
+    // POST challenge + record to the SAME prefixed path — the decision must complete.
+    const postTo = (b: object) => fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
+    const ch = await (await postTo({ phase: "challenge", token, decision: "approve" })).json();
+    expect(ch.challenge).toBeTruthy();
+    const post = await postTo({ token, decision: "approve", timestamp: ch.timestamp, ...assertion(ch.challenge, sign) });
+    expect(post.status).toBe(200);
+    expect((await resolution).decision).toBe("approve");
+  });
+
+  it("normalizes a trailing slash on a prefixed base (no '//sign')", () => {
     const pending = new PendingDecisions();
     const { approver } = passkeyApprover("m:ceo");
     const i = intentWith([approver]);
-    // Mounted behind a path prefix — the link must keep "/approvals", not collapse to origin.
-    const signer = new SigningServer({ pending, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin] }, baseUrl: origin + "/approvals" });
+    const signer = new SigningServer({ pending, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin] }, baseUrl: origin + "/approvals/" });
     void signer.awaitResolution(i);
     const url = signer.signingUrl(i, "m:ceo");
     expect(url).toContain("/approvals/sign?token=");
-    // A trailing slash on the prefixed base must still not double up.
-    const signer2 = new SigningServer({ pending, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin] }, baseUrl: origin + "/approvals/" });
-    void signer2.awaitResolution(i);
-    expect(signer2.signingUrl(i, "m:ceo")).toContain("/approvals/sign?token=");
-    expect(signer2.signingUrl(i, "m:ceo")).not.toContain("/approvals//sign");
+    expect(url).not.toContain("/approvals//sign");
   });
 
   it("GET with an invalid/expired token shows an error page (410)", async () => {

@@ -267,16 +267,18 @@ export async function awaitWithDefault(
   authoritySecret: string,
   webauthn?: WebAuthnPolicy,
 ): Promise<Resolution> {
+  // Consume the caller's adapter promise unconditionally as a safety net, BEFORE
+  // any check that can throw: a rejecting adapter must NEVER leak as an unhandled
+  // rejection (a process crash on modern Node) if a synchronous check below throws
+  // before the promise is wired into the race. assertIntentInvariants can now throw
+  // on a malformed agent identity too, so this MUST come first. The real handling
+  // still happens in `guarded`.
+  void resolution.catch(() => {});
+
   // Validate BEFORE computing a deadline: a NaN/huge created_at or timeout on a
   // wire Intent would otherwise collapse the review window (setTimeout(NaN) fires
   // immediately), silently erasing the human veto. Fail closed on a bad Intent.
   assertIntentInvariants(intent);
-
-  // Consume the caller's adapter promise unconditionally as a safety net: a
-  // rejecting adapter must NEVER leak as an unhandled rejection (a process crash
-  // on modern Node) if a synchronous check below throws before the promise is
-  // wired into the race. The real handling still happens in `guarded`.
-  void resolution.catch(() => {});
 
   // Compute the deadline window and reject a far-future Intent BEFORE wiring up
   // `guarded`: its CS-28 rejection handler can throw, so orphaning it here (by

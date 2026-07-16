@@ -463,7 +463,23 @@ describe("verifyAll()", () => {
     // is always false, so an empty allowlist faults every receipt as untrusted-key on an honest log.
     const i = intent(2);
     await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
-    await expect(log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedKeys: [] })).rejects.toThrow(/trustedKeys must not be an empty array|at least one key/);
+    await expect(log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedKeys: [] })).rejects.toThrow(/trustedKeys must not be empty|at least one/);
+  });
+
+  it("throws on an empty-STRING trustedKeys (it must not slip past the empty guard)", async () => {
+    // trustedKeys: "" normalizes to [""], which matches no real key — same all-untrusted false alarm
+    // as trustedKeys: []. The guard must catch a no-usable-key allowlist whatever its shape.
+    const i = intent(2);
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
+    await expect(log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedKeys: "" })).rejects.toThrow(/trustedKeys must not be empty|at least one/);
+  });
+
+  it("throws on an EMPTY intents array (would fault every receipt as unknown-intent)", async () => {
+    // Symmetric to the other empty-array guards: intents: [] builds an empty binding map, so every
+    // receipt on an honest log faults unknown-intent (ok:false) — a false tamper alarm. Reject it.
+    const i = intent(2);
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
+    await expect(log.verifyAll({ intents: [], authorityKey: authorityPub })).rejects.toThrow(/intents must not be an empty array|at least one Intent/);
   });
 });
 

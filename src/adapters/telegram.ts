@@ -17,6 +17,7 @@ import {
   assertVouchedApprovers,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
+import { publicKeyFromSecret } from "../core/keys.js";
 
 /** Constant-time compare of the webhook secret token (length is not secret). */
 function secretEquals(a: string, b: string): boolean {
@@ -55,6 +56,10 @@ export function telegramConfigFromEnv(overrides: Partial<TelegramConfig> = {}): 
  */
 export class TelegramAdapter implements Adapter {
   readonly channel = "telegram";
+  /** The authority public key this adapter signs vouched receipts with — reconciled by wrapAction. */
+  get authorityPublicKey(): string {
+    return publicKeyFromSecret(this.cfg.authorityKey);
+  }
   private readonly pending = new PendingDecisions();
   private readonly cfg: TelegramConfig;
   private offset = 0;

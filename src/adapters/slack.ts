@@ -16,6 +16,7 @@ import {
   assertVouchedApprovers,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
+import { publicKeyFromSecret } from "../core/keys.js";
 import type { Intent, Resolution } from "../core/types.js";
 
 export interface SlackConfig {
@@ -52,6 +53,10 @@ function slackEscape(s: string): string {
  */
 export class SlackAdapter implements Adapter {
   readonly channel = "slack";
+  /** The authority public key this adapter signs vouched receipts with — reconciled by wrapAction. */
+  get authorityPublicKey(): string {
+    return publicKeyFromSecret(this.cfg.authorityKey);
+  }
   private readonly pending = new PendingDecisions();
   private readonly cfg: SlackConfig;
 

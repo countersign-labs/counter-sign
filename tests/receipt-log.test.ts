@@ -158,8 +158,22 @@ describe("verifyAll()", () => {
     const stray = intent();
     await log.append(signDecision(known, "approve", "local:a", authority));
     await log.append(signDecision(stray, "approve", "local:a", authority));
-    const r = await log.verifyAll({ intents: [known] });
+    // authorityKey lets the known vouched receipt verify cleanly, isolating the
+    // unknown-intent check to the stray receipt.
+    const r = await log.verifyAll({ intents: [known], authorityKey: authorityPub });
     expect(r.faults).toEqual([{ index: 1, intent_id: stray.intent_id, actor: "local:a", reason: "unknown-intent" }]);
+  });
+
+  it("faults a vouched/Default receipt as missing-authority-key when authorityKey is omitted", async () => {
+    // An authority-signed receipt cannot be verified without the authority key, so the
+    // audit reports it honestly (not silently valid, not a tamper alarm).
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority)); // honest vouched approval
+    const r = await log.verifyAll({ intents: [i] }); // no authorityKey
+    expect(r.ok).toBe(false);
+    expect(r.faults).toEqual([{ index: 0, intent_id: i.intent_id, actor: "local:a", reason: "missing-authority-key" }]);
+    // …and it clears once the authority key is supplied.
+    expect((await log.verifyAll({ intents: [i], authorityKey: authorityPub })).ok).toBe(true);
   });
 
   it("faults a FORGED vouched receipt when audited with authorityKey", async () => {

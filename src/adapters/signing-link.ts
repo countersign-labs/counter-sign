@@ -13,6 +13,13 @@
 // awaitResolution() hands back the SigningServer's collection promise. The server
 // verifies each self-signed passkey receipt against the approver's OWN bound key,
 // so — like every keyed path — a compromised authority server cannot forge it.
+//
+// @experimental — the browser-passkey web-delivery CHANNEL is still stabilizing. The
+// SECURITY guarantees are the same as every keyed path (the server holds no approver
+// key), but this async delivery/collection glue is not yet frozen. For production keyed
+// approvals today, prefer raw-ed25519 approvers signing with the `approve` CLI (stable),
+// or vouched approvers via the chat/email adapters. The core protocol does not depend
+// on this adapter.
 
 import { CountersignError } from "../core/errors.js";
 import type { Adapter } from "../adapter.js";
@@ -110,12 +117,13 @@ export class SigningLinkAdapter implements Adapter {
         firstError ??= err;
       }
     }
-    // Fail closed ONLY when nothing could be delivered AND no decision has landed: no
-    // approver can ever decide, so don't wait out the timeout. Otherwise let the decision
-    // — or the timeout Default, which is `reject` for any quorum > 1 — resolve it. A
-    // partial delivery that can't reach quorum therefore fails SAFE (times out to
-    // reject), never fails open.
-    if (delivered === 0 && this.server.isPending(intent)) {
+    // Fail closed ONLY when NOTHING could be delivered: no approver has a link, so none
+    // can ever decide, and a default:"approve" Intent must not time out to approve on a
+    // total delivery failure. (delivered === 0 ⇒ no decision could have landed, so no
+    // isPending race to worry about.) A PARTIAL delivery is fine: the reachable approvers
+    // may meet quorum, and if they can't it times out to the Default — reject for any
+    // quorum > 1 — which fails SAFE, never open.
+    if (delivered === 0) {
       this.captured.delete(intent.intent_id);
       const err = firstError instanceof Error ? firstError : new CountersignError(`delivery failed for every approver of intent ${intent.intent_id}`);
       this.server.cancel(intent, err);

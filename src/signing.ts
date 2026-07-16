@@ -8,6 +8,11 @@
 // button; the approver taps it, confirms with their passkey, and the assertion
 // is POSTed back. The server never holds the approver's key — it only relays and
 // verifies (via PendingDecisions.record), so it cannot forge a keyed approval.
+//
+// @experimental — the browser-passkey signing UX is still stabilizing. Its security
+// (approver-signed receipts the server can't forge) matches every keyed path, but this
+// HTTP delivery/collection surface is not yet frozen. Stable keyed signing today is the
+// raw-ed25519 `approve` CLI; vouched approvals use the chat/email adapters.
 
 import { createHash, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -119,12 +124,6 @@ export class SigningServer {
    *  it immediately instead of leaving it for the deadline reaper. */
   cancel(intent: Intent, err: Error): void {
     this.cfg.pending.cancel(intent.intent_id, err);
-  }
-
-  /** True while the Intent is still awaiting a decision (not yet resolved/evicted).
-   *  Lets a caller tell a genuine delivery failure from one that raced a decision. */
-  isPending(intent: Intent): boolean {
-    return this.cfg.pending.has(intent.intent_id);
   }
 
   /** Release every in-flight wait (graceful shutdown) — rejects awaiting resolutions. */

@@ -289,6 +289,18 @@ describe("verifyAll()", () => {
     expect((await log3.verifyAll({ intents: [i], authorityKey: authorityPub })).ok).toBe(false);
   });
 
+  it("applies trustedKeys as an ADDITIONAL allowlist to keyed receipts (with intents)", async () => {
+    const i = intent(2); // keyed local:a / local:b
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
+    // local:a's key is NOT in trustedKeys → the receipt faults though it's validly bound;
+    // the auditor's trust policy is honored, not dropped once the Intent authenticates.
+    const r = await log.verifyAll({ intents: [i], trustedKeys: [keyOf("local:b").publicKey] });
+    expect(r.ok).toBe(false);
+    expect(r.faults.some((f) => f.actor === "local:a" && f.reason === "untrusted-key")).toBe(true);
+    // …and when local:a's key IS in the allowlist, it passes.
+    expect((await log.verifyAll({ intents: [i], trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] })).ok).toBe(true);
+  });
+
   it("does NOT mis-flag an honest keyed receipt when its own key is in trustedKeys", async () => {
     // Regression: the keyed-slot==authority check must use the dedicated authorityKey,
     // NOT the trustedKeys allowlist — which legitimately holds the approvers' own keys.

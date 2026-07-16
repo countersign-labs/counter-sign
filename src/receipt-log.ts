@@ -412,6 +412,14 @@ export class ReceiptLog implements ReceiptSink {
           } else {
             reason = "untrusted-key"; // actor is not an approver of this Intent
           }
+          // `trustedKeys` is an ADDITIONAL allowlist: a receipt that passed its per-mode
+          // check must ALSO be signed by a key the auditor trusts. Applying it here (not
+          // only in the no-Intent fallback) means a keyed receipt whose approver key is
+          // NOT in trustedKeys is still faulted — the auditor's trust policy is honored,
+          // not silently dropped once the Intent authenticates. (authorityKey remains the
+          // distinct anchor for vouched/Default receipts; trustedKeys does not replace it.)
+          if (reason === undefined && opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn }))
+            reason = "untrusted-key";
         } else if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) {
           // No Intents supplied → fall back to the global trusted-set check.
           reason = "untrusted-key";

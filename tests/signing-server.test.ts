@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { PendingDecisions } from "../src/adapter.js";
 import { createSigningToken, verifySigningToken, SigningServer } from "../src/signing.js";
 import { SigningLinkAdapter } from "../src/adapters/signing-link.js";
+import { wrapAction } from "../src/shim.js";
 import { createIntent } from "../src/core/intent.js";
 import { fromB64url, generateKeypair, publicKeyFromSecret, signBytes, toB64url, utf8 } from "../src/core/keys.js";
 import type { Approver, Intent } from "../src/core/types.js";
@@ -224,5 +225,40 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     const i = createIntent({ action: "a", summary: "s", risk_tier: "low", approvers: [{ actor: "tg:1", mode: "vouched" }], timeout: 300, default: "reject" }, agent);
     const adapter = new SigningLinkAdapter({ server: signer, notify: () => {} });
     await expect(adapter.deliver(i)).rejects.toThrow(/keyed approvers only|vouched/);
+  });
+
+  it("wrapAction runs a keyed 2-of-2 passkey action end-to-end through the adapter", async () => {
+    // The exact surface the review flagged as impossible: a multi-approver keyed
+    // Intent driven through the normal wrapAction path, resolving to run the action.
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const b = passkeyApprover("m:cto");
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+
+    const sent: { actor: string; url: string }[] = [];
+    const adapter = new SigningLinkAdapter({ server: signer, notify: (l) => void sent.push({ actor: l.actor, url: l.url }) });
+
+    let ran = false;
+    const deploy = wrapAction(
+      () => { ran = true; return "deployed"; },
+      { action: "prod.deploy", summary: "Deploy 2.4.0 to production", risk_tier: "critical", approvers: [a.approver, b.approver], quorum: 2, timeout: 300, default: "reject" },
+      adapter,
+      { agent, authorityKey: authority.secretKey, webauthn: { rpId, allowedOrigins: [origin] } },
+    );
+
+    const resultP = deploy();
+    // deliver() hands both links to notify before wrapAction awaits resolution.
+    for (let i = 0; i < 100 && sent.length < 2; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(sent.length).toBe(2);
+    for (const { actor, url } of sent) {
+      const token = new URL(url.replace(origin, base)).searchParams.get("token");
+      const sign = actor === "m:ceo" ? a.sign : b.sign;
+      const ch = await getChallenge(base, token, "approve");
+      expect((await record(base, token, "approve", ch, sign)).status).toBe(200);
+    }
+    expect(await resultP).toBe("deployed"); // the guarded action ran on the keyed quorum
+    expect(ran).toBe(true);
   });
 });

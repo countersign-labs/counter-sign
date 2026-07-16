@@ -8,8 +8,10 @@ import {
   authorityKeyFromEnv,
   escapeHtml,
   formatIntent,
+  pruneExpired,
   readBody,
   requireEnv,
+  verifyBearerToken,
   PendingDecisions,
   type Adapter,
   assertVouchedApprovers,
@@ -18,7 +20,7 @@ import { canonicalize } from "../core/canonical.js";
 import { deadline } from "../core/defaults.js";
 import { CountersignError } from "../core/errors.js";
 import { quorumOf } from "../core/intent.js";
-import { fromB64url, publicKeyFromSecret, signContext, toB64url, verifyContext } from "../core/keys.js";
+import { publicKeyFromSecret, signContext, toB64url } from "../core/keys.js";
 import { LINK_CONTEXT, type Decision, type Intent, type Resolution } from "../core/types.js";
 
 export interface EmailConfig {
@@ -61,24 +63,18 @@ export function createLinkToken(intent: Intent, decision: Decision, authoritySec
 
 /** Verify a link token's signature and shape. Returns null on any failure. */
 export function verifyLinkToken(token: string, authorityPublicKey: string): LinkPayload | null {
-  const dot = token.indexOf(".");
-  if (dot < 0) return null;
-  const body = fromB64url(token.slice(0, dot));
-  if (!verifyContext(authorityPublicKey, LINK_CONTEXT, body.toString("utf8"), token.slice(dot + 1))) return null;
-  try {
-    const payload = JSON.parse(body.toString("utf8"));
-    if (
-      typeof payload?.intent_id !== "string" ||
-      !UUID_RE.test(payload.intent_id) ||
-      (payload.decision !== "approve" && payload.decision !== "reject") ||
-      typeof payload.exp !== "number" ||
-      !Number.isFinite(payload.exp)
-    )
-      return null;
-    return payload as LinkPayload;
-  } catch {
+  // Shared decode+signature verify (LINK_CONTEXT); this caller enforces the LinkPayload shape.
+  const payload = verifyBearerToken(token, authorityPublicKey) as LinkPayload | null;
+  if (
+    !payload ||
+    typeof payload.intent_id !== "string" ||
+    !UUID_RE.test(payload.intent_id) ||
+    (payload.decision !== "approve" && payload.decision !== "reject") ||
+    typeof payload.exp !== "number" ||
+    !Number.isFinite(payload.exp)
+  )
     return null;
-  }
+  return payload;
 }
 
 /**
@@ -156,7 +152,10 @@ export class EmailAdapter implements Adapter {
     return (req, res) => {
       void (async () => {
         const url = new URL(req.url ?? "/", "http://localhost");
-        if (url.pathname !== "/decide") {
+        // Match "*/decide" at the END of the path (like SigningServer's "*/sign"), so a
+        // proxy-prefixed mount (EMAIL_CALLBACK_BASE_URL=".../approvals") works whether the proxy
+        // preserves or strips the prefix. The signed token authorizes the request, not the path.
+        if (!url.pathname.endsWith("/decide")) {
           res.writeHead(404).end("not found");
           return;
         }
@@ -173,7 +172,10 @@ export class EmailAdapter implements Adapter {
             200,
             `Confirm: ${escapeHtml(payload.decision)}`,
             `You are about to <strong>${escapeHtml(payload.decision)}</strong> intent <code>${escapeHtml(payload.intent_id)}</code>.` +
-              `<form method="POST" action="/decide">` +
+              // No action attribute → the POST submits to THIS page's own URL (the prefixed
+              // ".../decide" it was served from), not the origin-root "/decide" — so it reaches
+              // the handler behind a path-prefixed mount instead of 404ing.
+              `<form method="POST">` +
               `<input type="hidden" name="token" value="${escapeHtml(token)}">` +
               `<button type="submit">Confirm ${escapeHtml(payload.decision)}</button></form>` +
               `<p>Nothing happens until you press the button.</p>`,
@@ -209,7 +211,7 @@ export class EmailAdapter implements Adapter {
           // Burn the links only AFTER a real settle — single-use applies to a decision
           // that actually happened. Prune expired entries first so the map cannot grow
           // without bound.
-          this.pruneDecided(Date.now());
+          pruneExpired(this.decided, Date.now());
           this.decided.set(payload.intent_id, payload.exp);
           page(
             res,
@@ -239,12 +241,6 @@ export class EmailAdapter implements Adapter {
     if (!this.pending.has(payload.intent_id))
       return { ok: false, status: 410, reason: "This intent is no longer pending." };
     return { ok: true, payload };
-  }
-
-  /** Drop decided-intent entries whose links have already expired: an expired link is
-   *  rejected upstream (no replay is possible), so retaining them only leaks memory. */
-  private pruneDecided(now: number): void {
-    for (const [id, exp] of this.decided) if (now >= exp) this.decided.delete(id);
   }
 
   createServer(): Server {

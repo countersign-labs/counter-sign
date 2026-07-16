@@ -329,9 +329,15 @@ export class ReceiptLog implements ReceiptSink {
     let trustedMaterials: Set<string> | undefined;
     if (opts.trustedKeys !== undefined) {
       const tk = typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys;
-      if (!tk.some((k) => k !== ""))
+      // Keep only usable (non-empty STRING) entries. A non-string (e.g. an unset env var reaching an
+      // untyped caller as `undefined`) must NOT crash credentialKeyMaterial(undefined) with a raw
+      // TypeError mid-audit — it is simply not a trusted key. If nothing usable remains, the allowlist
+      // matches nothing (every receipt would fault untrusted-key on an honest log) — reject it as the
+      // likely mistake it is, the same clean error [], "", and [""] already get.
+      const usable = tk.filter((k): k is string => typeof k === "string" && k !== "");
+      if (usable.length === 0)
         throw new CountersignError("verifyAll: trustedKeys must not be empty — omit it, or supply at least one (non-empty) key");
-      trustedMaterials = new Set(tk.map(credentialKeyMaterial));
+      trustedMaterials = new Set(usable.map(credentialKeyMaterial));
     }
     // An Intent's approver bindings are only a trust anchor if the Intent ITSELF
     // authenticates — otherwise a tampered archived Intent (approver key swapped,

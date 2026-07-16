@@ -488,6 +488,17 @@ describe("verifyAll()", () => {
     expect((await log.verifyAll({ trustedKeys: [`webauthn-ed25519:${generateKeypair().publicKey}`] })).ok).toBe(false);
   });
 
+  it("does not CRASH on a non-string trustedKeys entry — filters it, cleanly errors if none usable", async () => {
+    const i = intent();
+    await log.append(signDecision(i, "approve", "local:a", authority)); // public_key = raw authorityPub
+    // An untyped (JS) caller passes an unset env var → [undefined]. Must be a clean CountersignError,
+    // NOT a raw TypeError from credentialKeyMaterial(undefined) that produces no report at all.
+    await expect(log.verifyAll({ trustedKeys: [undefined as unknown as string] })).rejects.toThrow(CountersignError);
+    await expect(log.verifyAll({ trustedKeys: [undefined as unknown as string] })).rejects.toThrow(/trustedKeys must not be empty/);
+    // A junk entry ALONGSIDE a real key is simply ignored — honest report, no crash.
+    expect((await log.verifyAll({ trustedKeys: [authorityPub, undefined as unknown as string] })).ok).toBe(true);
+  });
+
   it("throws on an EMPTY intents array (would fault every receipt as unknown-intent)", async () => {
     // Symmetric to the other empty-array guards: intents: [] builds an empty binding map, so every
     // receipt on an honest log faults unknown-intent (ok:false) — a false tamper alarm. Reject it.

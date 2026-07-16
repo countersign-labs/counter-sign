@@ -14,6 +14,7 @@ import { canonicalize } from "./core/canonical.js";
 import { normalizeActor } from "./core/countersignature.js";
 import { isCanonicalPublicKey, publicKeyFromSecret, signContext, toB64url, utf8, verifyContext } from "./core/keys.js";
 import { isValidCredentialDescriptor, isWebAuthnCredential, verifyWebAuthnAssertion, type WebAuthnAssertion, type WebAuthnPolicy } from "./core/webauthn.js";
+import { assertIntentInvariants } from "./core/intent.js";
 import { CountersignError } from "./core/errors.js";
 import { COUNTERSIGN_VERSION, type Intent } from "./core/types.js";
 
@@ -250,6 +251,10 @@ export function assertApproversEnrolled(
   expectedAuthorityPublicKey: string,
   expectedHead?: RegistryHead,
 ): void {
+  // Self-validate the Intent so this holds even when called standalone (its own doc
+  // says to compose it with verifyResolution, but don't rely on caller discipline):
+  // a malformed/hostile Intent's approvers must never be trusted here either.
+  assertIntentInvariants(intent);
   if (!isCanonicalPublicKey(expectedAuthorityPublicKey))
     throw new CountersignError("expected authority public key is not a canonical ed25519 key");
   // Both keys must be canonical or the distinctness compare below could be dodged by

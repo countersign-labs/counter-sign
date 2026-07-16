@@ -78,6 +78,10 @@ export function wrapAction<A extends unknown[], R>(
     // so an Intent that fails them is still surfaced to the observer.
     opts.onIntent?.(intent);
     const authority = opts.authorityKey ?? authorityKeyFromEnv();
+    // Derive the authority public key ONCE — both pre-delivery checks below need it (deriving it
+    // per-check is redundant ed25519 crypto per guarded call). awaitWithDefault still derives its OWN
+    // trusted key from the secret: that is a security boundary (it must not trust a caller-supplied key).
+    const authorityPub = publicKeyFromSecret(authority);
     // The adapter (e.g. SigningLinkAdapter) may carry the WebAuthn policy its signer
     // verifies against; verify with the SAME policy — otherwise the signer accepts an
     // assertion the verifier later rejects (a post-approval split-brain). Reconcile:
@@ -86,11 +90,11 @@ export function wrapAction<A extends unknown[], R>(
     // Same split-brain, the authority key: if the adapter signs vouched receipts (and the timeout
     // Default) with a DIFFERENT authority key than this runtime verifies with, the approver is told
     // "approved" but verifyResolution rejects the receipt afterward. Reconcile before delivering.
-    reconcileAuthority(authority, adapter.authorityPublicKey);
+    reconcileAuthority(authorityPub, adapter.authorityPublicKey);
     // Fail fast on configurations that would otherwise be rejected only AFTER a human
     // approves — a split-brain where the approver is told "approved" but the guarded
     // action is silently blocked. Runs before anything is delivered.
-    assertDeliverable(intent, authority, webauthn);
+    assertDeliverable(intent, authorityPub, webauthn);
 
     await adapter.deliver(intent);
     const resolution = await awaitWithDefault(intent, adapter.awaitResolution(intent), authority, webauthn);
@@ -140,8 +144,8 @@ function reconcileWebAuthn(fromOpts?: WebAuthnPolicy, fromAdapter?: WebAuthnPoli
  * rejected at verification — a post-approval split-brain. If the adapter exposes the authority key it
  * signs with, it MUST equal the key this runtime verifies with.
  */
-function reconcileAuthority(authoritySecret: string, adapterAuthorityPublicKey?: string): void {
-  if (adapterAuthorityPublicKey !== undefined && adapterAuthorityPublicKey !== publicKeyFromSecret(authoritySecret))
+function reconcileAuthority(authorityPub: string, adapterAuthorityPublicKey?: string): void {
+  if (adapterAuthorityPublicKey !== undefined && adapterAuthorityPublicKey !== authorityPub)
     throw new CountersignError(
       "wrapAction: the adapter signs receipts with a different authority key than opts.authorityKey — the signer and verifier must use the SAME authority key (rotate both together), or a valid receipt would be rejected after approval",
     );
@@ -153,8 +157,7 @@ function reconcileAuthority(authoritySecret: string, adapterAuthorityPublicKey?:
  * failure (the approver sees "approved", the action never runs) into an immediate,
  * actionable error before anything is sent.
  */
-function assertDeliverable(intent: Intent, authoritySecret: string, webauthn?: WebAuthnPolicy): void {
-  const authorityPub = publicKeyFromSecret(authoritySecret);
+function assertDeliverable(intent: Intent, authorityPub: string, webauthn?: WebAuthnPolicy): void {
   // Separation of duty: the authoring agent key must be distinct from the authority key.
   if (intent.agent?.public_key === authorityPub)
     throw new CountersignError(

@@ -78,6 +78,11 @@ if (approverKey) {
     } catch {
       die(`could not read/parse --webauthn-pop file ${popFile}`, 2);
     }
+    // JSON.parse("null") (and "1", "\"s\"", "[]") does NOT throw but is not an object; dereferencing
+    // parsed.authenticator_data below would then be an uncaught TypeError → exit 1 with a raw stack
+    // trace instead of the clean die() error. Guard it, as signing.ts / registry.fromJSONL do.
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      die("--webauthn-pop file must contain authenticator_data, client_data_json, and signature", 2);
     if (!parsed.authenticator_data || !parsed.client_data_json || !parsed.signature)
       die("--webauthn-pop file must contain authenticator_data, client_data_json, and signature", 2);
     webauthnPop = {
@@ -95,7 +100,10 @@ try {
     ? registry.revoke(actor!, publicKey, orgKey!)
     : registry.enroll(actor!, publicKey, orgKey!, { pop, webauthnPop });
   writeFileSync(registryPath!, registry.toJSONL());
-  process.stdout.write(`${rec.typ}: ${actor} -> ${publicKey}\nregistry: ${registryPath} (${registry.all.length} records, chain ${registry.verifyChain(rec.org_public_key) ? "ok" : "BROKEN"})\n`);
+  // The chain was verified under --org-key before appending (line ~51) and enroll/revoke maintain it,
+  // so it is intact by construction — no need to re-walk and re-verify every record's signature here
+  // (O(records) crypto) just to print a status word.
+  process.stdout.write(`${rec.typ}: ${actor} -> ${publicKey}\nregistry: ${registryPath} (${registry.all.length} records)\n`);
 } catch (e) {
   die(`${(e as Error).message}`);
 }

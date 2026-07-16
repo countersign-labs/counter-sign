@@ -562,6 +562,22 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     expect(p1).toBe(p2); // same captured promise, not a brand-new pending.wait
   });
 
+  it("re-subscribing AFTER the deadline rejects instead of minting a fresh never-resolving wait", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    // Short timeout so the deadline — and the captured-entry eviction it triggers — passes quickly.
+    const i = createIntent({ action: "a", summary: "s", risk_tier: "low", approvers: [a.approver], quorum: 1, timeout: 1, default: "reject" }, agent);
+    const { signer } = makeServer(pending);
+    const adapter = new SigningLinkAdapter({ server: signer, notify: () => {} });
+    await adapter.deliver(i); // captures the wait; its deadline reaper evicts both captured + server entry at ~1s
+    await new Promise((r) => setTimeout(r, 1200)); // let the deadline pass
+    // BEFORE the fix: awaitResolution falls through to server.awaitResolution → a fresh wait whose
+    // reaper fires immediately, leaving a promise that never resolves (a hang, or the wrong Default).
+    // AFTER: past the deadline the intent is no longer pending, so it rejects deterministically.
+    await expect(adapter.awaitResolution(i)).rejects.toThrow(/deadline|no longer pending/i);
+    expect(pending.size).toBe(0); // no leaked fresh entry
+  }, 6000);
+
   it("deliver() after close() is refused", async () => {
     const pending = new PendingDecisions();
     const a = passkeyApprover("m:ceo");

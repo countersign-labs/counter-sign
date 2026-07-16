@@ -350,6 +350,44 @@ describe("verifyAll()", () => {
     const ok = await log.verifyAll({ intents: [i], trustedAgentKeys: [agent.keypair.publicKey] });
     expect(ok.ok).toBe(true);
   });
+
+  it("faults a keyed receipt in BARE mode (no authorityKey / no trustedKeys) — the authority-key holder cannot forge a keyed quorum", async () => {
+    // The authority-key holder authors an Intent (agent == authority), binds a keyed approver to
+    // a key IT controls, and self-signs that approver's receipt. In BARE mode there is NO anchor:
+    // no authorityKey for the separation-of-duty check (agent≠authority, approver-key≠authority),
+    // and no trustedKeys allowlist to constrain the approver key. The receipt then only verifies
+    // against an attacker-chosen binding, so it must fault as missing-authority-key (honest, like
+    // vouched/Default), NOT silently pass ok=true — the exact SoD bypass keyed quorums exist to block.
+    const attacker = generateKeypair();
+    const evil = createIntent(
+      { action: "a", summary: "s", risk_tier: "critical", approvers: [{ actor: "local:a", mode: "keyed", public_key: attacker.publicKey }], quorum: 1, timeout: 300, default: "reject" },
+      { id: "agent:evil", keypair: { publicKey: authorityPub, secretKey: authority } },
+    );
+    await log.append(signDecision(evil, "approve", "local:a", attacker.secretKey, "approver"));
+    const bare = await log.verifyAll({ intents: [evil] }); // no authorityKey, no trustedKeys
+    expect(bare.ok).toBe(false);
+    expect(bare.faults.some((f) => f.reason === "missing-authority-key")).toBe(true);
+    // A trustedKeys allowlist that omits the attacker's key is a valid anchor and also catches it.
+    expect((await log.verifyAll({ intents: [evil], trustedKeys: [keyOf("local:b").publicKey] })).ok).toBe(false);
+  });
+
+  it("does NOT fault an authority-signed vouched OR timeout-Default receipt when trustedKeys holds only approver keys (round-7 regression)", async () => {
+    // The additional trustedKeys gate must apply ONLY to keyed (approver-signed) receipts.
+    // authorityKey is the distinct anchor for authority-signed vouched approvals and the timeout
+    // Default; a trustedKeys allowlist that legitimately holds only approver keys must not fault them.
+    const iv = intent(); // vouched local:a / local:b
+    await log.append(signDecision(iv, "approve", "local:a", authority)); // honest vouched approval
+    const rv = await log.verifyAll({ intents: [iv], authorityKey: authorityPub, trustedKeys: [keyOf("local:a").publicKey] });
+    expect(rv.faults).toEqual([]);
+    expect(rv.ok).toBe(true);
+
+    // Same for a well-formed timeout Default (authority-signed, actor default:timeout).
+    const ik = intent(2); // quorum 2 → expected Default is reject
+    const atDeadline = new Date(deadline(ik) + 1).toISOString();
+    const log2 = new ReceiptLog(join(dir, "reg3-default.jsonl"));
+    await log2.append(signDecision(ik, "reject", "default:timeout", authority, "default", atDeadline));
+    expect((await log2.verifyAll({ intents: [ik], authorityKey: authorityPub, trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] })).ok).toBe(true);
+  });
 });
 
 describe("corruption is loud", () => {

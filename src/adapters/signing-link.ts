@@ -162,6 +162,16 @@ export class SigningLinkAdapter implements Adapter {
     const p = this.captured.get(intent.intent_id);
     if (p) return p;
     if (this.closed) return Promise.reject(new CountersignError("signing-link adapter is closed"));
+    // Past the deadline the captured wait has been reclaimed and the intent is no longer
+    // pending. Falling through to server.awaitResolution here would mint a BRAND-NEW wait whose
+    // reaper fires immediately (remaining <= 0), leaving a promise that never resolves — a hang for
+    // a raw await, or the wrong Default when wrapped in awaitWithDefault. Refuse deterministically
+    // instead: a decision, if any, was returnable from `captured` throughout the intent's live
+    // window; the durable outcome lives in the receipt log, not this best-effort in-memory wait.
+    if (Date.now() >= deadline(intent))
+      return Promise.reject(
+        new CountersignError(`intent ${intent.intent_id} is past its deadline — no longer pending (its resolution was reclaimed; consult the receipt log for the durable outcome)`),
+      );
     return this.server.awaitResolution(intent);
   }
 

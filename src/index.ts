@@ -7,6 +7,7 @@ export {
   type Adapter,
   type SettleResult,
   PendingDecisions,
+  assertVouchedApprovers,
   requireEnv,
   authorityKeyFromEnv,
   parseDecisionPayload,

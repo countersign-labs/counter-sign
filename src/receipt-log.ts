@@ -308,6 +308,11 @@ export class ReceiptLog implements ReceiptSink {
     // untampered log false-faults as `unverified-intent`. Reject it rather than misaudit.
     if (opts.trustedAgentKeys && opts.trustedAgentKeys.length === 0)
       throw new CountersignError("verifyAll: trustedAgentKeys must not be an empty array — omit it, or supply at least one agent key");
+    // Symmetric to the authorityKey guard: trustedAgentKeys is consulted ONLY inside the per-Intent
+    // `if (opts.intents)` block, so supplying it without `intents` is a silent no-op — the agent pin
+    // the auditor asked for never runs and the log gets an integrity-only pass. Throw instead.
+    if (opts.trustedAgentKeys && !opts.intents)
+      throw new CountersignError("verifyAll: trustedAgentKeys has no effect without `intents` (the agent pin is per-Intent) — omit it or supply intents");
     // An Intent's approver bindings are only a trust anchor if the Intent ITSELF
     // authenticates — otherwise a tampered archived Intent (approver key swapped,
     // signature now invalid) would let a fake receipt signed by the replacement key
@@ -407,21 +412,17 @@ export class ReceiptLog implements ReceiptSink {
             // slot — verifyResolution rejects exactly this, so the audit must too.
             reason = "untrusted-key";
           } else if (approver?.mode === "keyed") {
-            // A keyed slot must NOT be bound to ANY authority key (a keyed decision must be
-            // the approver's OWN key), then verified against that own bound key.
-            if (authorityKeys === undefined && opts.trustedKeys === undefined) {
-              // No keyed-slot SoD anchor: the check that a keyed slot is NOT bound to the authority
-              // key needs the authority key itself (or a trustedKeys allowlist, which excludes it —
-              // a slot bound to the authority key then faults as its key isn't allowlisted). Without
-              // either, a self-signed keyed receipt proves only that SOME key the Intent named signed
-              // it, so the authority-key holder can forge a quorum (bind + sign a key it controls) and
-              // an audit blind to the authority key can't tell. Fault honestly (like vouched/Default in
-              // bare mode); do not report ok. trustedAgentKeys is NOT sufficient here — it pins the
-              // agent dimension but cannot check keyed-slot ≠ authority (which verifyResolution enforces),
-              // so a keyed audit with trustedAgentKeys alone would diverge from enforcement. Supply
-              // authorityKey (or trustedKeys) — optionally WITH trustedAgentKeys to also pin the agent.
-              reason = "missing-authority-key";
-            } else if (authorityKeys && approver.public_key && authorityKeys.includes(credentialKeyMaterial(approver.public_key))) reason = "untrusted-key";
+            // A keyed slot must NOT be bound to the authority key (a keyed decision must be the
+            // approver's OWN key), then be verified against that own bound key. The keyed-slot ≠
+            // authority separation-of-duty check REQUIRES the authority key — like vouched/Default,
+            // and exactly as verifyResolution requires expectedAuthorityPublicKey. Neither trustedKeys
+            // (an approver allowlist that may itself CONTAIN the authority key — an auditor's slot
+            // bound to and signed by that key would then pass) nor trustedAgentKeys (an agent pin)
+            // can substitute; with either alone the audit would report ok on a keyed-slot==authority
+            // SoD violation that verifyResolution always rejects. So without authorityKey, fault
+            // `missing-authority-key`; trustedKeys/trustedAgentKeys are ADDITIONAL filters on top.
+            if (authorityKeys === undefined) reason = "missing-authority-key";
+            else if (approver.public_key && authorityKeys.includes(credentialKeyMaterial(approver.public_key))) reason = "untrusted-key";
             else if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else if (isTimeoutDefault) {
             // The timeout Default, checked like verifyResolution's default branch: decision

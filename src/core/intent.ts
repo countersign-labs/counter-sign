@@ -7,7 +7,7 @@ import { canonicalize } from "./canonical.js";
 import { normalizeActor } from "./countersignature.js";
 import { CountersignError } from "./errors.js";
 import { isCanonicalPublicKey, signContext, verifyContext, type Keypair } from "./keys.js";
-import { isValidCredentialDescriptor } from "./webauthn.js";
+import { credentialKeyMaterial, isValidCredentialDescriptor } from "./webauthn.js";
 import { COUNTERSIGN_VERSION, INTENT_CONTEXT, type Approver, type Intent, type IntentFields } from "./types.js";
 
 export interface AgentIdentity {
@@ -64,7 +64,7 @@ function validateApprovers(approvers: Approver[], quorum: number): void {
       // Dedup by the underlying key MATERIAL, not the string: a raw ed25519 key K
       // and the passkey descriptor `webauthn-ed25519:K` are the SAME key, so they
       // must not fill two quorum slots (one holder could satisfy both).
-      const material = a.public_key.startsWith("webauthn-ed25519:") ? a.public_key.slice("webauthn-ed25519:".length) : a.public_key;
+      const material = credentialKeyMaterial(a.public_key);
       if (keys.has(material))
         throw new CountersignError(`approver public_key ${a.public_key} shares key material with another approver`);
       keys.add(material);

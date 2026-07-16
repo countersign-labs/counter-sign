@@ -12,6 +12,7 @@ import {
   requireEnv,
   PendingDecisions,
   type Adapter,
+  assertVouchedApprovers,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
 import type { Intent, Resolution } from "../core/types.js";
@@ -65,6 +66,7 @@ export class WhatsAppAdapter implements Adapter {
   }
 
   async deliver(intent: Intent): Promise<void> {
+    assertVouchedApprovers(intent); // this adapter is vouched-only; keyed approvers use the SigningServer
     const res = await fetch(`${this.cfg.graphBase}/${this.cfg.phoneNumberId}/messages`, {
       method: "POST",
       headers: {

@@ -222,7 +222,7 @@ describe("Telegram keys the approver on the stable numeric id, not the mutable u
 describe("LocalAdapter refuses quorum it cannot authenticate (Codex re-review)", () => {
   it("rejects quorum > 1 at deliver (one terminal cannot represent distinct humans)", async () => {
     const a = new LocalAdapter(authority.secretKey);
-    await expect(a.deliver(intent(2))).rejects.toThrow(/single approver|quorum 1/);
+    await expect(a.deliver(intent(2))).rejects.toThrow(/single approver|quorum 1|keyed approver/);
   });
 });
 

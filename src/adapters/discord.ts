@@ -12,6 +12,7 @@ import {
   requireEnv,
   PendingDecisions,
   type Adapter,
+  assertVouchedApprovers,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
 import { hexToBytes, utf8, verifyRaw } from "../core/keys.js";
@@ -52,6 +53,7 @@ export class DiscordAdapter implements Adapter {
   }
 
   async deliver(intent: Intent): Promise<void> {
+    assertVouchedApprovers(intent); // this adapter is vouched-only; keyed approvers use the SigningServer
     const res = await fetch(`${this.cfg.apiBase}/channels/${this.cfg.channelId}/messages`, {
       method: "POST",
       headers: {

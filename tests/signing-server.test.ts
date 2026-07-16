@@ -47,6 +47,19 @@ function assertion(challenge: string, sign: (d: Buffer) => Buffer, org = origin)
   return { authenticator_data: toB64url(authData), client_data_json: toB64url(clientData), signature: toB64url(sign(signedData)) };
 }
 
+/** Click-time challenge (POST phase "challenge"). */
+async function getChallenge(base: string, token: string | null, decision: string): Promise<{ timestamp: string; challenge: string; error?: string }> {
+  const r = await fetch(`${base}/sign`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ phase: "challenge", token, decision }) });
+  return r.json();
+}
+/** POST the recorded assertion, signing `ch.challenge` but claiming `decision`. */
+function record(base: string, token: string | null, decision: string, ch: { timestamp: string; challenge: string }, sign: (d: Buffer) => Buffer) {
+  return fetch(`${base}/sign`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token, decision, timestamp: ch.timestamp, ...assertion(ch.challenge, sign) }),
+  });
+}
+
 const servers: Server[] = [];
 afterEach(() => { for (const s of servers.splice(0)) s.close(); });
 
@@ -75,14 +88,10 @@ describe("SigningServer GET/POST", () => {
     const url = signer.signingUrl(i, "m:ceo").replace(origin, base);
     const html = await (await fetch(url)).text();
     expect(html).toContain("Deploy 2.4.0 to production");
-    const data = JSON.parse(html.match(/const D = (\{.*?\});/s)![1]);
-
-    const a = assertion(data.challengeApprove, sign);
     const token = new URL(url).searchParams.get("token");
-    const post = await fetch(`${base}/sign`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token, decision: "approve", timestamp: data.timestamp, ...a }),
-    });
+
+    const ch = await getChallenge(base, token, "approve"); // click-time challenge
+    const post = await record(base, token, "approve", ch, sign);
     expect(post.status).toBe(200);
     expect((await post.json()).status).toBe("resolved");
     expect((await resolution).decision).toBe("approve");
@@ -97,13 +106,12 @@ describe("SigningServer GET/POST", () => {
     const base = await listen(server);
     void signer.awaitResolution(i);
     const url = signer.signingUrl(i, "m:ceo").replace(origin, base);
-    const data = JSON.parse((await (await fetch(url)).text()).match(/const D = (\{.*?\});/s)![1]);
     const token = new URL(url).searchParams.get("token");
-    const body = JSON.stringify({ token, decision: "approve", timestamp: data.timestamp, ...assertion(data.challengeApprove, sign) });
+    const ch = await getChallenge(base, token, "approve");
 
-    const first = await fetch(`${base}/sign`, { method: "POST", headers: { "content-type": "application/json" }, body });
+    const first = await record(base, token, "approve", ch, sign);
     expect(first.status).toBe(200);
-    const replay = await fetch(`${base}/sign`, { method: "POST", headers: { "content-type": "application/json" }, body });
+    const replay = await record(base, token, "approve", ch, sign); // exact replay
     expect(replay.status).toBe(410);
     expect((await replay.json()).error).toMatch(/already been used/);
   });
@@ -117,16 +125,12 @@ describe("SigningServer GET/POST", () => {
     const base = await listen(server);
     void signer.awaitResolution(i);
     const url = signer.signingUrl(i, "m:ceo").replace(origin, base);
-    const data = JSON.parse((await (await fetch(url)).text()).match(/const D = (\{.*?\});/s)![1]);
     const token = new URL(url).searchParams.get("token");
 
-    // Sign the APPROVE challenge but POST it as a REJECT — record recomputes the
-    // digest for "reject", which won't match the approve assertion.
-    const a = assertion(data.challengeApprove, sign);
-    const post = await fetch(`${base}/sign`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token, decision: "reject", timestamp: data.timestamp, ...a }),
-    });
+    // Get an APPROVE challenge, sign it, but POST it as a REJECT — the server
+    // recomputes the digest for "reject", which won't match the approve assertion.
+    const ch = await getChallenge(base, token, "approve");
+    const post = await record(base, token, "reject", ch, sign);
     expect(post.status).toBe(400);
   });
 

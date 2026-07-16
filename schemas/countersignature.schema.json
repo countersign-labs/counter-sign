@@ -2,64 +2,87 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://countersign.dev/schemas/countersignature.schema.json",
   "title": "Countersignature",
-  "description": "A signed, portable receipt of a decision over an Intent. counter-sign spec v0.2.",
-  "type": "object",
-  "required": [
-    "countersign",
-    "intent_id",
-    "decision",
-    "actor",
-    "policy",
-    "timestamp",
-    "public_key",
-    "signature"
-  ],
-  "additionalProperties": false,
-  "properties": {
-    "countersign": {
-      "description": "Protocol version.",
-      "const": "0.2"
-    },
-    "intent_id": {
-      "description": "The Intent this receipt decides.",
-      "type": "string",
-      "format": "uuid"
-    },
-    "decision": {
-      "enum": ["approve", "reject"]
-    },
-    "actor": {
-      "description": "Who decided, as channel:address — e.g. \"telegram:8675309\", or \"default:timeout\" when the Default fired.",
-      "type": "string",
-      "minLength": 1
-    },
-    "policy": {
-      "description": "\"approver\" for an explicit human decision; \"default\" when the Intent's declared Default fired at the deadline.",
-      "enum": ["approver", "default"]
-    },
-    "timestamp": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "public_key": {
-      "description": "base64url signing key: a raw 32-byte ed25519 key (43 chars, for a vouched/Default/raw-keyed receipt), or a passkey descriptor 'webauthn-ed25519:<43>' / 'webauthn-p256:<87>' for a WebAuthn receipt.",
-      "type": "string",
-      "pattern": "^([A-Za-z0-9_-]{43}|webauthn-ed25519:[A-Za-z0-9_-]{43}|webauthn-p256:[A-Za-z0-9_-]{87})$"
-    },
-    "signature": {
-      "description": "base64url signature over the canonical receipt: an ed25519 signature (86 chars), OR — when 'webauthn' is present — the authenticator assertion signature (variable length, e.g. a P-256 DER ECDSA signature).",
-      "type": "string",
-      "pattern": "^[A-Za-z0-9_-]+$"
-    },
-    "webauthn": {
-      "description": "Present iff this is a passkey (WebAuthn) receipt: the authenticator assertion whose challenge binds the canonical receipt digest.",
+  "description": "A signed, portable receipt of a decision over an Intent. counter-sign spec v0.2. Either an ed25519 receipt (vouched / Default / raw-keyed) or a WebAuthn passkey receipt.",
+  "$defs": {
+    "common": {
       "type": "object",
-      "required": ["authenticator_data", "client_data_json"],
-      "additionalProperties": false,
       "properties": {
-        "authenticator_data": { "type": "string", "minLength": 1 },
-        "client_data_json": { "type": "string", "minLength": 1 }
+        "countersign": { "description": "Protocol version.", "const": "0.2" },
+        "intent_id": { "description": "The Intent this receipt decides.", "type": "string", "format": "uuid" },
+        "decision": { "enum": ["approve", "reject"] },
+        "actor": {
+          "description": "Who decided, as channel:address — e.g. \"telegram:8675309\", or \"default:timeout\" when the Default fired.",
+          "type": "string",
+          "minLength": 1
+        },
+        "policy": {
+          "description": "\"approver\" for an explicit human decision; \"default\" when the Intent's declared Default fired at the deadline.",
+          "enum": ["approver", "default"]
+        },
+        "timestamp": { "type": "string", "format": "date-time" }
       }
     }
-  }
+  },
+  "oneOf": [
+    {
+      "description": "ed25519 receipt: a vouched / Default receipt (authority-signed) or a raw-keyed approver's receipt.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["countersign", "intent_id", "decision", "actor", "policy", "timestamp", "public_key", "signature"],
+      "allOf": [{ "$ref": "#/$defs/common" }],
+      "properties": {
+        "countersign": true,
+        "intent_id": true,
+        "decision": true,
+        "actor": true,
+        "policy": true,
+        "timestamp": true,
+        "public_key": {
+          "description": "base64url raw 32-byte ed25519 public key (43 chars).",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "signature": {
+          "description": "base64url ed25519 signature over the canonical receipt without this field (86 chars).",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$"
+        }
+      }
+    },
+    {
+      "description": "WebAuthn passkey receipt: the approver's credential descriptor + an authenticator assertion.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["countersign", "intent_id", "decision", "actor", "policy", "timestamp", "public_key", "signature", "webauthn"],
+      "allOf": [{ "$ref": "#/$defs/common" }],
+      "properties": {
+        "countersign": true,
+        "intent_id": true,
+        "decision": true,
+        "actor": true,
+        "policy": true,
+        "timestamp": true,
+        "public_key": {
+          "description": "Passkey credential descriptor: 'webauthn-ed25519:<43>' or 'webauthn-p256:<87>'.",
+          "type": "string",
+          "pattern": "^(webauthn-ed25519:[A-Za-z0-9_-]{43}|webauthn-p256:[A-Za-z0-9_-]{87})$"
+        },
+        "signature": {
+          "description": "base64url authenticator assertion signature (variable length — e.g. P-256 DER ECDSA).",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "webauthn": {
+          "description": "The authenticator assertion whose challenge binds the canonical receipt digest.",
+          "type": "object",
+          "required": ["authenticator_data", "client_data_json"],
+          "additionalProperties": false,
+          "properties": {
+            "authenticator_data": { "type": "string", "minLength": 1 },
+            "client_data_json": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  ]
 }

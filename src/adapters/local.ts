@@ -5,7 +5,7 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { userInfo } from "node:os";
-import { authorityKeyFromEnv, formatIntent, type Adapter } from "../adapter.js";
+import { assertVouchedApprovers, authorityKeyFromEnv, formatIntent, type Adapter } from "../adapter.js";
 import { signDecision } from "../core/countersignature.js";
 import { CountersignError } from "../core/errors.js";
 import { quorumOf } from "../core/intent.js";
@@ -27,6 +27,7 @@ export class LocalAdapter implements Adapter {
   constructor(private readonly authorityKey: string = authorityKeyFromEnv()) {}
 
   async deliver(intent: Intent): Promise<void> {
+    assertVouchedApprovers(intent); // this adapter is vouched-only; keyed approvers use the SigningServer
     if (quorumOf(intent) > 1) {
       throw new CountersignError(
         `local adapter supports a single approver (quorum 1); intent ${intent.intent_id} requires ${quorumOf(intent)}. ` +

@@ -13,6 +13,7 @@ import {
   requireEnv,
   PendingDecisions,
   type Adapter,
+  assertVouchedApprovers,
 } from "../adapter.js";
 import { CountersignError } from "../core/errors.js";
 import type { Intent, Resolution } from "../core/types.js";
@@ -59,6 +60,7 @@ export class SlackAdapter implements Adapter {
   }
 
   async deliver(intent: Intent): Promise<void> {
+    assertVouchedApprovers(intent); // this adapter is vouched-only; keyed approvers use the SigningServer
     await this.api("chat.postMessage", {
       channel: this.cfg.channelId,
       // plain_text never parses mrkdwn or broadcast mentions (<!channel> etc),

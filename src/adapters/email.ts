@@ -11,6 +11,7 @@ import {
   requireEnv,
   PendingDecisions,
   type Adapter,
+  assertVouchedApprovers,
 } from "../adapter.js";
 import { canonicalize } from "../core/canonical.js";
 import { deadline } from "../core/defaults.js";
@@ -105,6 +106,7 @@ export class EmailAdapter implements Adapter {
   }
 
   async deliver(intent: Intent): Promise<void> {
+    assertVouchedApprovers(intent); // this adapter is vouched-only; keyed approvers use the SigningServer
     // Bearer links go to one recipient, so distinct-approver quorum cannot be
     // satisfied — and MUST NOT be faked — over email. Refuse quorum > 1 loudly
     // rather than silently deadlock to the timeout Default.

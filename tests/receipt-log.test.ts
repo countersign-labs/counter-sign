@@ -121,7 +121,7 @@ describe("verifyAll()", () => {
     // local:a signs a receipt claiming to be local:b, using HER own key.
     const forged = signDecision(i, "approve", "local:b", keyOf("local:a").secretKey, "approver");
     await log.append(forged);
-    const report = await log.verifyAll({ intents: [i], trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] });
+    const report = await log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] });
     expect(report.ok).toBe(false);
     expect(report.faults.some((f) => f.reason === "untrusted-key")).toBe(true);
   });
@@ -289,16 +289,17 @@ describe("verifyAll()", () => {
     expect((await log3.verifyAll({ intents: [i], authorityKey: authorityPub })).ok).toBe(false);
   });
 
-  it("applies trustedKeys as an ADDITIONAL allowlist to keyed receipts (with intents)", async () => {
+  it("applies trustedKeys as an ADDITIONAL allowlist to keyed receipts (with intents + authorityKey)", async () => {
     const i = intent(2); // keyed local:a / local:b
     await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
-    // local:a's key is NOT in trustedKeys → the receipt faults though it's validly bound;
-    // the auditor's trust policy is honored, not dropped once the Intent authenticates.
-    const r = await log.verifyAll({ intents: [i], trustedKeys: [keyOf("local:b").publicKey] });
+    // local:a's key is NOT in trustedKeys → the receipt faults though it's validly bound; the auditor's
+    // trust policy is honored, not dropped once the Intent authenticates. authorityKey is the required
+    // keyed-slot SoD anchor; trustedKeys is the ADDITIONAL filter layered on top.
+    const r = await log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedKeys: [keyOf("local:b").publicKey] });
     expect(r.ok).toBe(false);
     expect(r.faults.some((f) => f.actor === "local:a" && f.reason === "untrusted-key")).toBe(true);
     // …and when local:a's key IS in the allowlist, it passes.
-    expect((await log.verifyAll({ intents: [i], trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] })).ok).toBe(true);
+    expect((await log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] })).ok).toBe(true);
   });
 
   it("does NOT mis-flag an honest keyed receipt when its own key is in trustedKeys", async () => {
@@ -306,7 +307,7 @@ describe("verifyAll()", () => {
     // NOT the trustedKeys allowlist — which legitimately holds the approvers' own keys.
     const i = intent(2); // keyed local:a / local:b, distinct keys
     await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
-    const r = await log.verifyAll({ intents: [i], trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] });
+    const r = await log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] });
     expect(r.faults).toEqual([]); // Alice's own key in trustedKeys must not fault her receipt
     expect(r.ok).toBe(true);
   });
@@ -372,8 +373,11 @@ describe("verifyAll()", () => {
     expect(only.faults.some((f) => f.reason === "missing-authority-key")).toBe(true);
     // Adding the authority key (the keyed-slot SoD anchor) alongside the agent pin clears it.
     expect((await log.verifyAll({ intents: [i], trustedAgentKeys: [agent.keypair.publicKey], authorityKey: authorityPub })).ok).toBe(true);
-    // …and trustedKeys is the other valid keyed anchor (it would fault a slot bound to the authority key).
-    expect((await log.verifyAll({ intents: [i], trustedAgentKeys: [agent.keypair.publicKey], trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] })).ok).toBe(true);
+    // …but trustedKeys alone is NOT the keyed anchor — it's an approver allowlist that may itself
+    // contain the authority key, so it can't check keyed-slot ≠ authority. authorityKey is required;
+    // trustedKeys/trustedAgentKeys only compose ON TOP of it (shown here with all three).
+    expect((await log.verifyAll({ intents: [i], trustedAgentKeys: [agent.keypair.publicKey], trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] })).ok).toBe(false);
+    expect((await log.verifyAll({ intents: [i], authorityKey: authorityPub, trustedAgentKeys: [agent.keypair.publicKey], trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] })).ok).toBe(true);
   });
 
   it("faults a keyed receipt in BARE mode (no authorityKey / no trustedKeys) — the authority-key holder cannot forge a keyed quorum", async () => {
@@ -412,6 +416,33 @@ describe("verifyAll()", () => {
     const log2 = new ReceiptLog(join(dir, "reg3-default.jsonl"));
     await log2.append(signDecision(ik, "reject", "default:timeout", authority, "default", atDeadline));
     expect((await log2.verifyAll({ intents: [ik], authorityKey: authorityPub, trustedKeys: [keyOf("local:a").publicKey, keyOf("local:b").publicKey] })).ok).toBe(true);
+  });
+
+  it("faults a keyed slot bound to the authority key even when trustedKeys contains it, no authorityKey (audit matches verifyResolution)", async () => {
+    // An auditor who (mis)uses trustedKeys as the authority allowlist and omits authorityKey. A keyed
+    // slot bound to — and signed by — the authority key is a SoD violation verifyResolution always
+    // rejects. Without authorityKey, verifyAll cannot check keyed-slot ≠ authority, so it must fault
+    // missing-authority-key — NOT pass just because the authority key happens to sit in trustedKeys.
+    const i = createIntent(
+      { action: "demo.op", summary: "x", risk_tier: "high", approvers: [{ actor: "local:a", mode: "keyed", public_key: authorityPub }], quorum: 1, timeout: 300, default: "reject" },
+      agent,
+    );
+    await log.append(signDecision(i, "approve", "local:a", authority, "approver"));
+    const r = await log.verifyAll({ intents: [i], trustedKeys: [authorityPub] }); // authority key IN trustedKeys, NO authorityKey
+    expect(r.ok).toBe(false);
+    expect(r.faults.some((f) => f.reason === "missing-authority-key")).toBe(true);
+    // With authorityKey supplied, the same slot is caught specifically as the keyed-slot==authority violation.
+    const r2 = await log.verifyAll({ intents: [i], authorityKey: authorityPub });
+    expect(r2.ok).toBe(false);
+    expect(r2.faults.some((f) => f.actor === "local:a" && f.reason === "untrusted-key")).toBe(true);
+  });
+
+  it("throws when trustedAgentKeys is supplied WITHOUT intents (silent no-op guard, symmetric to authorityKey)", async () => {
+    // trustedAgentKeys is consulted only inside the per-Intent block, so passing it alone would be a
+    // silent no-op yielding an integrity-only pass — like the authorityKey-without-intents case, throw.
+    const i = intent(2);
+    await log.append(signDecision(i, "approve", "local:a", keyOf("local:a").secretKey, "approver"));
+    await expect(log.verifyAll({ trustedAgentKeys: [agent.keypair.publicKey] })).rejects.toThrow(/trustedAgentKeys has no effect without|without `intents`/);
   });
 });
 

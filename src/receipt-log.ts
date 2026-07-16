@@ -7,8 +7,8 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { canonicalize } from "./core/canonical.js";
 import { normalizeActor, verifyCountersignature, type VerifyOptions } from "./core/countersignature.js";
-import { DEFAULT_TIMEOUT_ACTOR } from "./core/defaults.js";
-import { assertIntentInvariants, verifyIntent } from "./core/intent.js";
+import { DEFAULT_TIMEOUT_ACTOR, deadline } from "./core/defaults.js";
+import { assertIntentInvariants, quorumOf, verifyIntent } from "./core/intent.js";
 import { credentialKeyMaterial, isWebAuthnCredential } from "./core/webauthn.js";
 import { CountersignError } from "./core/errors.js";
 import { toB64url } from "./core/keys.js";
@@ -96,6 +96,14 @@ export interface VerifyAllOptions extends VerifyOptions {
    * agent key you never authorized. Independent of the Intent's own signature check.
    */
   trustedAgentKeys?: readonly string[];
+  /**
+   * The runtime authority public key, for the separation-of-duty checks
+   * verifyResolution enforces: a keyed slot must NOT be bound to it, and a timeout
+   * Default must be signed by it. Distinct from `trustedKeys` (a general allowlist that
+   * may legitimately contain approver keys), so supplying approver keys there no longer
+   * mis-flags honest keyed receipts. Supply it to audit those rules; omit to skip them.
+   */
+  authorityKey?: string;
   /**
    * A chain head captured earlier (see `head()`). Anchoring it externally is
    * how you detect *tail truncation*: a forward chain alone cannot tell that
@@ -329,21 +337,32 @@ export class ReceiptLog implements ReceiptSink {
           // (else one trusted approver could forge another's receipt). A vouched
           // approver, or the canonical timeout Default, must be authority-signed. An
           // explicit receipt from an actor NOT in the Intent is a fault outright.
-          const approver = intent.approvers.find((a) => normalizeActor(a.actor) === normalizeActor(cs.actor));
-          const isTimeoutDefault = cs.policy === "default" && normalizeActor(cs.actor) === DEFAULT_TIMEOUT_ACTOR;
+          const csActor = normalizeActor(cs.actor);
+          const approver = intent.approvers.find((a) => normalizeActor(a.actor) === csActor);
+          const isTimeoutDefault = cs.policy === "default" && csActor === DEFAULT_TIMEOUT_ACTOR;
           if (approver && cs.policy !== "approver") {
             // A named approver's receipt is always an "approver" decision. A "default"
             // (or other) policy on it is the timeout-Default label smuggled onto a human
             // slot — verifyResolution rejects exactly this, so the audit must too.
             reason = "untrusted-key";
           } else if (approver?.mode === "keyed") {
-            // A keyed slot must NOT be bound to a trusted authority key (verifyResolution
+            // A keyed slot must NOT be bound to the runtime AUTHORITY key (verifyResolution
             // rejects exactly this — a keyed decision must be the approver's OWN key, not
-            // one the authority also holds). Keep the audit in step with enforcement.
-            const authorityKeys = opts.trustedKeys === undefined ? [] : typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys;
-            if (approver.public_key && authorityKeys.includes(credentialKeyMaterial(approver.public_key))) reason = "untrusted-key";
+            // one the authority also holds). Uses the dedicated `authorityKey`, so a
+            // general `trustedKeys` allowlist that legitimately holds approver keys does
+            // not mis-flag them; omitting `authorityKey` skips only this SoD check.
+            if (opts.authorityKey && approver.public_key && credentialKeyMaterial(approver.public_key) === opts.authorityKey) reason = "untrusted-key";
             else if (!verifyCountersignature(cs, { trustedKeys: approver.public_key, webauthn: opts.webauthn })) reason = "untrusted-key";
-          } else if (approver || isTimeoutDefault) {
+          } else if (isTimeoutDefault) {
+            // The timeout Default, checked like verifyResolution's default branch: its
+            // decision matches the quorum-derived expected default, it is stamped at/after
+            // the deadline (never backdated), and it is authority-signed.
+            const expectedDefault = quorumOf(intent) > 1 ? "reject" : intent.default;
+            const authoritySigner = opts.authorityKey ?? opts.trustedKeys;
+            if (cs.decision !== expectedDefault) reason = "untrusted-key";
+            else if (!(Date.parse(cs.timestamp) >= deadline(intent))) reason = "untrusted-key";
+            else if (authoritySigner !== undefined && !verifyCountersignature(cs, { trustedKeys: authoritySigner, webauthn: opts.webauthn })) reason = "untrusted-key";
+          } else if (approver) {
             if (opts.trustedKeys !== undefined && !verifyCountersignature(cs, { trustedKeys: opts.trustedKeys, webauthn: opts.webauthn })) reason = "untrusted-key";
           } else {
             reason = "untrusted-key"; // actor is not an approver of this Intent

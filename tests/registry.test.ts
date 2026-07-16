@@ -236,6 +236,33 @@ describe("assertApproversEnrolled (strict mode) + end-to-end", () => {
 });
 
 describe("the enroll CLI", () => {
+  it("exits cleanly (die, exit 2) on a malformed --org-key — no raw stack trace", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "cs-reg-")), "reg.jsonl");
+    try {
+      execFileSync("npx", ["tsx", "scripts/enroll.ts", "--registry", path, "--actor", "m:x", "--approver-key", alice.secretKey, "--org-key", "not-a-valid-key"], { encoding: "utf8", stdio: "pipe" });
+      throw new Error("should have exited non-zero");
+    } catch (e) {
+      const err = e as { status?: number; stderr?: string };
+      expect(err.status).toBe(2); // clean die(), not an uncaught-exception crash
+      expect(String(err.stderr)).toMatch(/not a valid ed25519 secret key/);
+      expect(String(err.stderr)).not.toMatch(/\bat .*:\d+:\d+\)/); // no stack-trace frames
+    }
+  });
+
+  it("does not let a valueless flag swallow the next flag as its value", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "cs-reg-")), "reg.jsonl");
+    // --actor has no value; the parser must treat the following --org-key as a flag,
+    // not read it as the actor — so this is a usage error, not a silent mis-parse.
+    try {
+      execFileSync("npx", ["tsx", "scripts/enroll.ts", "--registry", path, "--actor", "--org-key", alice.secretKey], { encoding: "utf8", stdio: "pipe" });
+      throw new Error("should have exited non-zero");
+    } catch (e) {
+      const err = e as { status?: number; stderr?: string };
+      expect(err.status).toBe(2);
+      expect(String(err.stderr)).toMatch(/usage/i);
+    }
+  });
+
   it("enrolls a raw approver (computing PoP), writing a chain-valid registry, then revokes", () => {
     const path = join(mkdtempSync(join(tmpdir(), "cs-reg-")), "reg.jsonl");
     execFileSync("npx", ["tsx", "scripts/enroll.ts", "--registry", path, "--actor", "m:alice", "--approver-key", alice.secretKey, "--org-key", org.secretKey], { encoding: "utf8" });

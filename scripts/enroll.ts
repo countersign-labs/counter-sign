@@ -33,11 +33,21 @@ const publicKeyArg = arg("public-key");
 
 if (!registryPath || !actor || !orgKey) die("usage: enroll --registry <file> --actor <actor> (--approver-key <secret>|--public-key <key>) --org-key <org-secret> [--revoke]", 2);
 
-const registry = existsSync(registryPath!) ? ApproverRegistry.fromJSONL(readFileSync(registryPath!, "utf8")) : new ApproverRegistry();
+let registry: ApproverRegistry;
+try {
+  registry = existsSync(registryPath!) ? ApproverRegistry.fromJSONL(readFileSync(registryPath!, "utf8")) : new ApproverRegistry();
+} catch (e) {
+  die(`could not load registry at ${registryPath}: ${(e as Error).message}`, 2);
+}
 
 // Never append to a registry that does not verify under the supplied org key —
 // otherwise a wrong --org-key silently produces a mixed-root, unverifiable file.
-const orgPub = publicKeyFromSecret(orgKey!);
+let orgPub: string;
+try {
+  orgPub = publicKeyFromSecret(orgKey!);
+} catch {
+  die("--org-key is not a valid ed25519 secret key", 2);
+}
 if (registry.all.length > 0 && !registry.verifyChain(orgPub))
   die(`existing registry at ${registryPath} does not verify under the supplied --org-key (wrong org key, or the file was tampered) — refusing to write`, 2);
 
@@ -45,8 +55,12 @@ let publicKey: string;
 let pop: string | undefined;
 let webauthnPop: PasskeyEnrollmentProof | undefined;
 if (approverKey) {
-  publicKey = publicKeyFromSecret(approverKey);
-  pop = createEnrollmentProof(actor!, approverKey);
+  try {
+    publicKey = publicKeyFromSecret(approverKey);
+    pop = createEnrollmentProof(actor!, approverKey);
+  } catch {
+    die("--approver-key is not a valid ed25519 secret key", 2);
+  }
 } else if (publicKeyArg) {
   publicKey = publicKeyArg;
   // A passkey descriptor cannot self-prove possession; enrolling one requires a

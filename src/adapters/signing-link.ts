@@ -22,6 +22,7 @@
 // on this adapter.
 
 import { CountersignError } from "../core/errors.js";
+import { deadline } from "../core/defaults.js";
 import type { Adapter } from "../adapter.js";
 import type { WebAuthnPolicy } from "../core/webauthn.js";
 import type { Intent, Resolution } from "../core/types.js";
@@ -107,19 +108,35 @@ export class SigningLinkAdapter implements Adapter {
     pending.then(() => { settled = true; }, () => { settled = true; });
 
     // BEST-EFFORT delivery, CONCURRENTLY — independent channels; one slow/hung channel
-    // must not block the others or sum their latencies. One approver's channel being down
-    // must NOT abort a quorum the others can still satisfy.
-    // `Promise.resolve().then(...)` so a SYNCHRONOUS throw from notify becomes a rejected
-    // result instead of escaping the map before allSettled sees it.
-    const results = await Promise.allSettled(links.map((l) => Promise.resolve().then(() => this.notify(l))));
-    const delivered = results.filter((r) => r.status === "fulfilled").length;
-    const firstError = results.find((r): r is PromiseRejectedResult => r.status === "rejected")?.reason;
+    // must not block the others or sum their latencies. Count outcomes as they arrive;
+    // `Promise.resolve().then(...)` normalizes a SYNCHRONOUS throw from notify to a
+    // rejection so it doesn't escape the map.
+    let delivered = 0;
+    let firstError: unknown;
+    const batch = Promise.allSettled(
+      links.map((l) =>
+        Promise.resolve()
+          .then(() => this.notify(l))
+          .then(() => { delivered += 1; }, (e) => { firstError ??= e; }),
+      ),
+    );
+    // Do NOT block indefinitely on a hung notifier: proceed as soon as delivery finishes,
+    // a decision (or close()/abort) SETTLES the wait, or the deadline passes — whichever is
+    // first. Otherwise a never-settling notify would keep deliver() — and, since wrapAction
+    // awaits it before awaitWithDefault, the whole operation including its timeout — pending.
+    const remaining = Math.max(0, deadline(intent) - Date.now());
+    await Promise.race([
+      batch,
+      pending.then(() => {}, () => {}),
+      new Promise<void>((res) => { const t = setTimeout(res, remaining); t.unref?.(); }),
+    ]);
 
     // Swallow a partial delivery only when it fails SAFE: a decision already settled, or
     // the Default is `reject` (timeout → reject). Fail CLOSED on a TOTAL failure (nobody
     // can decide), or ANY failure under a `default:"approve"` Intent — the approve-Default
-    // must not fire while a named approver never got their veto link. Using `settled`
-    // (not isPending) means the deadline reaper can't mask an incomplete delivery.
+    // must not fire while a named approver never got their veto link. `delivered` is a
+    // snapshot: a still-pending (hung) or failed notify counts as not delivered, so
+    // `anyFailed` captures both. `settled` (not isPending) means the reaper can't mask it.
     const anyFailed = delivered < links.length;
     if (!settled && (delivered === 0 || (anyFailed && intent.default === "approve"))) {
       this.captured.delete(intent.intent_id);

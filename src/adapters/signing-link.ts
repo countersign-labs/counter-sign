@@ -117,15 +117,17 @@ export class SigningLinkAdapter implements Adapter {
         firstError ??= err;
       }
     }
-    // Fail closed ONLY when NOTHING could be delivered: no approver has a link, so none
-    // can ever decide, and a default:"approve" Intent must not time out to approve on a
-    // total delivery failure. (delivered === 0 ⇒ no decision could have landed, so no
-    // isPending race to worry about.) A PARTIAL delivery is fine: the reachable approvers
-    // may meet quorum, and if they can't it times out to the Default — reject for any
-    // quorum > 1 — which fails SAFE, never open.
-    if (delivered === 0) {
+    // A partial delivery is only safe to SWALLOW when the eventual outcome fails safe:
+    // the Intent's Default is `reject` (timeout → reject), or a real decision already
+    // landed. Fail CLOSED otherwise — a TOTAL failure (nobody can decide), or ANY failure
+    // under a `default:"approve"` Intent (the approve-Default must not fire while a named
+    // approver never received their veto link). The isPending guard means a decision that
+    // already resolved during the loop is honored, not thrown away.
+    const anyFailed = delivered < links.length;
+    const stillPending = this.server.isPending(intent);
+    if (stillPending && (delivered === 0 || (anyFailed && intent.default === "approve"))) {
       this.captured.delete(intent.intent_id);
-      const err = firstError instanceof Error ? firstError : new CountersignError(`delivery failed for every approver of intent ${intent.intent_id}`);
+      const err = firstError instanceof Error ? firstError : new CountersignError(`delivery incomplete for intent ${intent.intent_id} — failing closed (Default is "approve")`);
       this.server.cancel(intent, err);
       throw err;
     }

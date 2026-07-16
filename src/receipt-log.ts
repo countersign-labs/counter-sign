@@ -9,7 +9,7 @@ import { canonicalize } from "./core/canonical.js";
 import { normalizeActor, verifyCountersignature, type VerifyOptions } from "./core/countersignature.js";
 import { DEFAULT_TIMEOUT_ACTOR, deadline } from "./core/defaults.js";
 import { assertIntentInvariants, quorumOf, verifyIntent } from "./core/intent.js";
-import { credentialKeyMaterial, isWebAuthnCredential } from "./core/webauthn.js";
+import { credentialKeyMaterial, isValidCredentialDescriptor, isWebAuthnCredential } from "./core/webauthn.js";
 import { CountersignError } from "./core/errors.js";
 import { isCanonicalPublicKey, toB64url } from "./core/keys.js";
 import type { Countersignature, Intent, Resolution } from "./core/types.js";
@@ -303,7 +303,13 @@ export class ReceiptLog implements ReceiptSink {
         let authentic = false;
         try {
           assertIntentInvariants(i);
-          authentic = verifyIntent(i) && (!opts.trustedAgentKeys || opts.trustedAgentKeys.includes(i.agent?.public_key));
+          authentic =
+            verifyIntent(i) &&
+            // Separation of duty (as verifyResolution enforces): an Intent authored BY the
+            // authority key is not trusted for its bindings — else the authority-key holder
+            // could bind approver keys it controls, sign the receipts, and pass the audit.
+            (opts.authorityKey === undefined || i.agent?.public_key !== opts.authorityKey) &&
+            (!opts.trustedAgentKeys || opts.trustedAgentKeys.includes(i.agent?.public_key));
         } catch {
           authentic = false;
         }
@@ -330,7 +336,12 @@ export class ReceiptLog implements ReceiptSink {
       // A passkey receipt with no policy supplied CANNOT be verified — report that
       // distinctly rather than as `invalid-signature`, so an audit that simply forgot
       // to pass `webauthn` doesn't read as a tamper alarm on untampered receipts.
-      if (isWebAuthnCredential(cs.public_key) && !opts.webauthn) reason = "missing-webauthn-policy";
+      // A MALFORMED passkey descriptor (right prefix, corrupt/non-canonical key bytes) is
+      // detectable WITHOUT the RP policy — that's a signature/structural fault, not a
+      // missing-policy one. Only a structurally-VALID passkey descriptor with no policy
+      // supplied is the honest "can't verify without policy" case.
+      if (isWebAuthnCredential(cs.public_key) && !isValidCredentialDescriptor(cs.public_key)) reason = "invalid-signature";
+      else if (isWebAuthnCredential(cs.public_key) && !opts.webauthn) reason = "missing-webauthn-policy";
       else if (!verifyCountersignature(cs, { webauthn: opts.webauthn })) reason = "invalid-signature";
       else {
         const intent = intentsById?.get(cs.intent_id);

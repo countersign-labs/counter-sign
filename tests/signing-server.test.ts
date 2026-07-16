@@ -428,6 +428,29 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     expect((await resolution).decision).toBe("approve"); // C being unreachable didn't break it
   });
 
+  it("fails closed on a PARTIAL delivery under default:approve (no approve-on-timeout with an unreachable approver)", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:a");
+    const b = passkeyApprover("m:b");
+    // quorum-1, default:"approve": if B's link fails and A stays silent, the approve-Default
+    // would fire though B never got a veto link — so a partial delivery must fail closed.
+    const i = createIntent({ action: "a", summary: "s", risk_tier: "low", approvers: [a.approver, b.approver], quorum: 1, timeout: 300, default: "approve" }, agent);
+    const { signer } = makeServer(pending);
+    const adapter = new SigningLinkAdapter({ server: signer, notify: (l) => { if (l.actor === "m:b") throw new Error("B down"); } });
+    await expect(adapter.deliver(i)).rejects.toThrow(/B down|incomplete|delivery/i); // fails closed (propagates the delivery error)
+    expect(pending.has(i.intent_id)).toBe(false); // reclaimed
+  });
+
+  it("SWALLOWS a partial delivery under default:reject (M<N can still proceed / times out to reject)", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:a");
+    const b = passkeyApprover("m:b");
+    const i = createIntent({ action: "a", summary: "s", risk_tier: "low", approvers: [a.approver, b.approver], quorum: 1, timeout: 300, default: "reject" }, agent);
+    const { signer } = makeServer(pending);
+    const adapter = new SigningLinkAdapter({ server: signer, notify: (l) => { if (l.actor === "m:b") throw new Error("B down"); } });
+    await expect(adapter.deliver(i)).resolves.toBeUndefined(); // partial is safe under reject-Default
+  });
+
   it("fails closed only when NO approver could be reached", async () => {
     const pending = new PendingDecisions();
     const a = passkeyApprover("m:a");

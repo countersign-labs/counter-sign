@@ -108,3 +108,47 @@ describe("PolicyLog append/state", () => {
     expect(() => log.append({ kind: "admin-add", org: "o1", public_key: rootA.publicKey, name: "dup" }, rootA.secretKey)).toThrow(/already active/i);
   });
 });
+
+describe("PolicyLog.verifyChain", () => {
+  it("accepts an honest log", () => {
+    const log = bootstrapped();
+    log.append({ kind: "role-set", role }, rootA.secretKey);
+    expect(log.verifyChain()).toBe(true);
+  });
+  it("rejects a tampered change (signature no longer matches)", () => {
+    const log = bootstrapped();
+    log.append({ kind: "rule-set", rule }, rootA.secretKey);
+    const entries = JSON.parse(JSON.stringify(log.entries)) as typeof log.entries;
+    (entries[1].change as { rule: Rule }).rule.quorum = 5; // tamper post-signature
+    expect(new PolicyLog([...entries]).verifyChain()).toBe(false);
+  });
+  it("rejects an entry forged by a non-admin key", () => {
+    const log = bootstrapped();
+    // Hand-forge a role-set signed by adminB (never added) with a correct prev/seq.
+    const prev = hashEntry(log.entries[0]);
+    const unsigned = { countersign: "0.2" as const, seq: 1, change: { kind: "role-set" as const, role }, issued_at: "2026-01-01T00:00:00.000Z", prev, signer_public_key: adminB.publicKey };
+    const signature = signContext(adminB.secretKey, POLICY_CONTEXT, canonicalPolicyEntry(unsigned));
+    expect(new PolicyLog([...log.entries, { ...unsigned, signature }]).verifyChain()).toBe(false);
+  });
+  it("rejects a broken prev link", () => {
+    const log = bootstrapped();
+    log.append({ kind: "role-set", role }, rootA.secretKey);
+    const entries = JSON.parse(JSON.stringify(log.entries)) as PolicyEntry[];
+    entries[1].prev = "deadbeef";
+    expect(new PolicyLog(entries).verifyChain()).toBe(false);
+  });
+  it("rejects a hand-crafted log whose entries span more than one org", () => {
+    const log = bootstrapped(); // genesis org "o1", admin rootA
+    // Hand-craft a second entry that is validly signed by the active admin rootA,
+    // with a correct prev/seq link, but whose change belongs to a different org.
+    // append() would reject this (org mismatch); verifyChain must reject it too.
+    const prev = hashEntry(log.entries[0]);
+    const unsigned = {
+      countersign: "0.2" as const, seq: 1,
+      change: { kind: "role-set" as const, role: { ...role, org: "o2" } },
+      issued_at: "2026-01-01T00:00:00.000Z", prev, signer_public_key: rootA.publicKey,
+    };
+    const signature = signContext(rootA.secretKey, POLICY_CONTEXT, canonicalPolicyEntry(unsigned));
+    expect(new PolicyLog([...log.entries, { ...unsigned, signature }]).verifyChain()).toBe(false);
+  });
+});

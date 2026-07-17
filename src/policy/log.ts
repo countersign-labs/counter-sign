@@ -7,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { canonicalize } from "../core/canonical.js";
 import { CountersignError } from "../core/errors.js";
-import { publicKeyFromSecret, signContext, utf8 } from "../core/keys.js";
+import { publicKeyFromSecret, signContext, utf8, verifyContext } from "../core/keys.js";
 import { validateRole, validateRule } from "./validate.js";
 import { POLICY_CONTEXT } from "./types.js";
 import type { AdminKey, PolicyChange, PolicyEntry, PolicyState, PolicyStore, Role, Rule } from "./types.js";
@@ -123,6 +123,43 @@ export class PolicyLog implements PolicyStore {
       }
     }
     return { admins, roles, rules };
+  }
+
+  /** Walk the chain: contiguous seq, correct prev links, self-signed admin-add genesis,
+   *  every entry signed by a key active as an admin immediately before it, every entry's
+   *  change belongs to the genesis org (single-org invariant), and the last-admin
+   *  invariant held historically. Total — never throws; returns false on any break. */
+  verifyChain(): boolean {
+    try {
+      const admins = new Map<string, AdminKey>();
+      let prevHash: string | null = null;
+      let genesisOrg: string | null = null;
+      for (let i = 0; i < this._entries.length; i++) {
+        const e = this._entries[i];
+        if (e.seq !== i) return false;
+        if (e.prev !== prevHash) return false;
+        const { signature, ...unsigned } = e;
+        if (!verifyContext(e.signer_public_key, POLICY_CONTEXT, canonicalPolicyEntry(unsigned), signature)) return false;
+        if (i === 0) {
+          if (e.change.kind !== "admin-add" || e.change.public_key !== e.signer_public_key) return false;
+          genesisOrg = changeOrg(e.change);
+        } else if (!admins.has(e.signer_public_key)) {
+          return false; // signer was not an active admin at this point
+        }
+        if (changeOrg(e.change) !== genesisOrg) return false; // single-org invariant
+        // Fold this entry into the running admin set for the NEXT iteration's check.
+        const c = e.change;
+        if (c.kind === "admin-add") admins.set(c.public_key, { org: c.org, public_key: c.public_key, name: c.name });
+        else if (c.kind === "admin-revoke") {
+          if (admins.size <= 1) return false; // last-admin invariant must hold historically too
+          admins.delete(c.public_key);
+        }
+        prevHash = hashEntry(e);
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   state(): PolicyState {

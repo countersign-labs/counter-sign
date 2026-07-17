@@ -79,4 +79,32 @@ describe("PolicyLog append/state", () => {
     const bad: Rule = { ...rule, id: "u2", name: "bad", quorum: 2, default: "approve" };
     expect(() => log.append({ kind: "rule-set", rule: bad }, rootA.secretKey)).toThrow(/quorum > 1/);
   });
+
+  it("rejects a change for a different org than the log's genesis org", () => {
+    const log = bootstrapped(); // genesis org is "o1"
+    expect(() => log.append({ kind: "role-set", role: { ...role, org: "o2" } }, rootA.secretKey)).toThrow(/org/i);
+  });
+
+  it("role-delete removes a role from state; deleting a missing role throws", () => {
+    const log = bootstrapped();
+    log.append({ kind: "role-set", role }, rootA.secretKey);
+    expect(log.getRoleById("o1", "r1")).toBeDefined();
+    log.append({ kind: "role-delete", org: "o1", id: "r1" }, rootA.secretKey);
+    expect(log.getRoleById("o1", "r1")).toBeUndefined();
+    expect(() => log.append({ kind: "role-delete", org: "o1", id: "r1" }, rootA.secretKey)).toThrow(/does not exist/i);
+  });
+
+  it("rule-delete removes a rule from state; deleting a missing rule throws", () => {
+    const log = bootstrapped();
+    log.append({ kind: "rule-set", rule }, rootA.secretKey);
+    expect(log.getRule("o1", "refund")).toBeDefined();
+    log.append({ kind: "rule-delete", org: "o1", id: "u1" }, rootA.secretKey);
+    expect(log.getRule("o1", "refund")).toBeUndefined();
+    expect(() => log.append({ kind: "rule-delete", org: "o1", id: "u1" }, rootA.secretKey)).toThrow(/does not exist/i);
+  });
+
+  it("rejects admin-add of an already-active key", () => {
+    const log = bootstrapped();
+    expect(() => log.append({ kind: "admin-add", org: "o1", public_key: rootA.publicKey, name: "dup" }, rootA.secretKey)).toThrow(/already active/i);
+  });
 });

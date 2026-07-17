@@ -104,12 +104,18 @@ export function challengeFor(unsigned: object): string {
 export function verifyCountersignature(cs: Countersignature, opts: VerifyOptions = {}): boolean {
   try {
     const { signature, webauthn, ...unsigned } = cs;
-    if (typeof signature !== "string" || typeof cs.public_key !== "string") return false;
+    // Read `public_key` exactly ONCE — the rest-spread above snapshots it into
+    // `unsigned`, the same value that gets canonicalized into the signed bytes.
+    // Using `cs.public_key` afresh at each site would let an accessor-backed field
+    // return one key for the trust check and another for canonicalize/verify (a
+    // TOCTOU forgery). Everything below reads only this snapshot.
+    const publicKey = unsigned.public_key;
+    if (typeof signature !== "string" || typeof publicKey !== "string") return false;
     if (opts.trustedKeys !== undefined) {
       const trusted = typeof opts.trustedKeys === "string" ? [opts.trustedKeys] : opts.trustedKeys;
-      if (!trusted.includes(cs.public_key)) return false;
+      if (!trusted.includes(publicKey)) return false;
     }
-    const passkey = isWebAuthnCredential(cs.public_key);
+    const passkey = isWebAuthnCredential(publicKey);
     if (passkey || webauthn !== undefined) {
       // Passkey (WebAuthn) receipt: the signature is an authenticator assertion,
       // not a plain ed25519 signature over the receipt. A webauthn block with a
@@ -120,14 +126,14 @@ export function verifyCountersignature(cs: Countersignature, opts: VerifyOptions
       // canonical receipt (minus signature and webauthn), domain-separated.
       const challenge = challengeFor(unsigned);
       return verifyWebAuthnAssertion(webauthn, signature, {
-        credential: cs.public_key,
+        credential: publicKey,
         expectedChallenge: challenge,
         rpId: opts.webauthn.rpId,
         allowedOrigins: opts.webauthn.allowedOrigins,
         requireUserVerification: opts.webauthn.requireUserVerification,
       });
     }
-    return verifyContext(cs.public_key, COUNTERSIGNATURE_CONTEXT, canonicalize(unsigned), signature);
+    return verifyContext(publicKey, COUNTERSIGNATURE_CONTEXT, canonicalize(unsigned), signature);
   } catch {
     return false;
   }

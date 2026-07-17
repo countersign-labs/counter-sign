@@ -33,7 +33,27 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
   frame, missing User-Present, UV-required-but-absent, forged authenticator key,
   cross-intent replay, and the no-RP-policy fail-closed rule — plus resolution-level
   accept/reject including a 2-of-2 passkey quorum, a forged slot, and under-quorum.
-  346 tests.
+
+### Security
+- **Spec §4 finality enforced at the shared layer.** `PendingDecisions` keeps a
+  wall-clock-gated tombstone of each resolved intent, so a resolved intent can never be
+  reopened — a re-`wait()` returns the recorded decision and a late or second approver's
+  receipt is ignored — for *every* caller (any adapter instance, a raw `awaitResolution`),
+  not just one adapter. Gated on `Date.now()` vs the deadline (the same authority
+  `record()`/`settle()` use), so it is immune to Node's ~24.8-day timer ceiling and to
+  backward wall-clock steps.
+- **Passkey verification hardening.** `verifyCountersignature` reads the receipt's
+  `public_key` once, so an accessor-backed field can no longer return one key to the trust
+  check and another to the signature check; `verifyWebAuthnAssertion` rejects a non-array
+  `allowedOrigins` (closing a substring-match fail-open) and the impossible
+  Backup-State-without-Backup-Eligibility flag combination; and `SigningServer` binds a
+  recorded passkey timestamp to the intent deadline (no post-dating a decision past a short
+  window) without a cross-clock-domain comparison that would false-reject a genuine
+  multi-host approval.
+- Hardening surfaced by a convergence review loop (second-engine review + workflow code
+  review + adversarial review, driven to zero findings), each fix locked by a red-first
+  regression test and re-validated by the browser + WebAuthn human-simulation harness.
+  359 tests.
 
 ## [0.2.0] — 2026-07-17
 

@@ -7,7 +7,10 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PendingDecisions, readBody, type Adapter } from "../src/adapter.js";
-import { signDecision } from "../src/core/countersignature.js";
+import { signDecision, verifyCountersignature } from "../src/core/countersignature.js";
+import { canonicalize } from "../src/core/canonical.js";
+import { signContext } from "../src/core/keys.js";
+import { COUNTERSIGNATURE_CONTEXT } from "../src/core/types.js";
 import { awaitWithDefault, deadline, defaultResolution, verifyResolution } from "../src/core/defaults.js";
 import { wrapAction } from "../src/shim.js";
 import { InvalidCountersignatureError } from "../src/core/errors.js";
@@ -773,5 +776,48 @@ describe("Telegram webhook survives an oversized body (Codex #3)", () => {
       process.off("unhandledRejection", onRej);
       a.close();
     }
+  });
+
+  it("cannot forge a receipt with an accessor-backed public_key that diverges across reads", () => {
+    // A crafted receipt whose `public_key` is a GETTER: it returns the trusted authority
+    // key on the read the trust check uses, but the ATTACKER key on the read used to
+    // canonicalize + verify the signature — a TOCTOU forgery if the verifier reads the
+    // field more than once. The receipt is genuinely signed by the attacker over a body
+    // that canonicalizes with the attacker key, so a naive verifier that trust-checks the
+    // trusted value but signature-checks against the attacker value would accept it.
+    const attacker = generateKeypair();
+    const trusted = generateKeypair();
+    const base = {
+      countersign: "0.2" as const,
+      intent_id: "11111111-1111-4111-8111-111111111111",
+      decision: "approve" as const,
+      actor: "m:ceo",
+      policy: "approver" as const,
+      timestamp: "2026-01-01T00:00:00.000Z",
+      public_key: attacker.publicKey, // the body is signed with this key present
+    };
+    const signature = signContext(attacker.secretKey, COUNTERSIGNATURE_CONTEXT, canonicalize(base));
+
+    let reads = 0;
+    const receipt = { ...base, signature };
+    Object.defineProperty(receipt, "public_key", {
+      enumerable: true,
+      configurable: true,
+      // The classic exploit ordering: return `trusted` ONLY on the trust-check read
+      // (3rd read in the multi-read verifier this fix removed), `attacker` on the
+      // spread/canonicalize and signature-verify reads. A verifier that read the field
+      // once per site would trust-check `trusted` yet signature-check the attacker's
+      // real signature → accept. The single-snapshot fix reads it once (the spread),
+      // so trust and signature see the SAME key and it fails closed.
+      get() {
+        reads += 1;
+        return reads === 3 ? trusted.publicKey : attacker.publicKey;
+      },
+    });
+
+    // Must be rejected: either the trust check sees the attacker key (not trusted), or the
+    // signature check sees the trusted key (signature was made by the attacker) — never both
+    // aligned, because a single snapshot is used throughout.
+    expect(verifyCountersignature(receipt as never, { trustedKeys: [trusted.publicKey] })).toBe(false);
   });
 });

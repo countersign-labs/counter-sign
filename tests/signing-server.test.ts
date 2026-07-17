@@ -7,11 +7,12 @@
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PendingDecisions } from "../src/adapter.js";
 import { createSigningToken, verifySigningToken, SigningServer } from "../src/signing.js";
 import { SigningLinkAdapter } from "../src/adapters/signing-link.js";
 import { wrapAction } from "../src/shim.js";
+import { challengeFor, unsignedReceipt } from "../src/core/countersignature.js";
 import { createIntent } from "../src/core/intent.js";
 import { fromB64url, generateKeypair, publicKeyFromSecret, signBytes, toB64url, utf8 } from "../src/core/keys.js";
 import type { Approver, Intent } from "../src/core/types.js";
@@ -661,5 +662,170 @@ describe("SigningLinkAdapter — delivers keyed intents through the wrapAction p
     }
     expect(await resultP).toBe("deployed"); // the guarded action ran on the keyed quorum
     expect(ran).toBe(true);
+  });
+
+  it("rejects a self-minted receipt whose timestamp is OUTSIDE the intent validity window", async () => {
+    // The challenge phase is advisory: a client holding the passkey can skip it and
+    // self-mint a consistent receipt with any timestamp within the ±5-min skew band.
+    // Without the window binding, an approver could stamp their own approval AFTER the
+    // deadline. Here the intent's window is [created_at, created_at+60s); a receipt
+    // stamped now+120s is within skew but past the deadline → must be refused.
+    const pending = new PendingDecisions();
+    const { approver, sign } = passkeyApprover("m:ceo");
+    const i = createIntent({ action: "prod.deploy", summary: "Deploy", risk_tier: "critical", approvers: [approver], quorum: 1, timeout: 60, default: "reject" }, agent);
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    void signer.awaitResolution(i);
+    const token = new URL(signer.signingUrl(i, "m:ceo").replace(origin, base)).searchParams.get("token");
+
+    // Self-mint: challenge computed over the postdated receipt, no challenge-phase call.
+    const postdated = new Date(Date.now() + 120_000).toISOString();
+    const challenge = challengeFor(unsignedReceipt(i.intent_id, "approve", "m:ceo", approver.public_key!, postdated));
+    const res = await fetch(`${base}/sign`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token, decision: "approve", timestamp: postdated, ...assertion(challenge, sign) }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/validity window/);
+    expect(pending.has(i.intent_id)).toBe(true); // never recorded — still awaiting a real decision
+  });
+
+  it("accepts an on-time approval when the intent's created_at clock LEADS the server (multi-host, no false-reject)", async () => {
+    // Regression: the timestamp window must NOT compare the server-minted click time
+    // against the agent's created_at across clock domains. Simulate an agent whose clock
+    // runs 6 min ahead of this server (created_at is in the server's future). A genuine
+    // on-time click (ts ≈ server-now) must record — only ts >= deadline may reject.
+    const pending = new PendingDecisions();
+    const { approver, sign } = passkeyApprover("m:ceo");
+    const i = intentWith([approver]); // timeout 300s
+    (i as { created_at: string }).created_at = new Date(Date.now() + 6 * 60_000).toISOString();
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+    const resolution = signer.awaitResolution(i);
+    const token = new URL(signer.signingUrl(i, "m:ceo").replace(origin, base)).searchParams.get("token");
+    const ch = await getChallenge(base, token, "approve"); // server-minted click timestamp ≈ server-now
+    const post = await record(base, token, "approve", ch, sign);
+    expect(post.status).toBe(200); // pre-fix lower bound wrongly returned 400 here
+    expect((await resolution).decision).toBe("approve");
+  });
+
+  it("a resolved intent cannot be REOPENED by a later deliver()/decision (spec §4 finality)", async () => {
+    // Once an intent resolves, a second deliver() must not let an un-consumed approver
+    // record a CONTRADICTORY second resolution. Finality lives in PendingDecisions: a
+    // re-wait returns the recorded decision, and a late decision is ignored. (Re-delivery
+    // itself is allowed — it may legitimately retry a partial delivery — so it MAY re-send
+    // links; what must never happen is the outcome flipping.)
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const b = passkeyApprover("m:cto");
+    const i = intentWith([a.approver, b.approver], 1); // quorum 1: either A or B decides
+    const { server, signer } = makeServer(pending);
+    servers.push(server);
+    const base = await listen(server);
+
+    const sent: { actor: string; url: string }[] = [];
+    const adapter = new SigningLinkAdapter({ server: signer, notify: (l) => void sent.push({ actor: l.actor, url: l.url }) });
+    const resolution = adapter.awaitResolution(i);
+    await adapter.deliver(i);
+
+    // A approves → quorum 1 resolved.
+    const aLink = sent.find((s) => s.actor === "m:ceo")!;
+    const aToken = new URL(aLink.url.replace(origin, base)).searchParams.get("token");
+    const ch = await getChallenge(base, aToken, "approve");
+    expect((await record(base, aToken, "approve", ch, a.sign)).status).toBe(200);
+    expect((await resolution).decision).toBe("approve");
+
+    // Re-deliver the SAME resolved intent: allowed, does not throw, and re-subscribing
+    // returns the ORIGINAL approve — not a fresh reopenable wait.
+    await adapter.deliver(i);
+    expect((await adapter.awaitResolution(i)).decision).toBe("approve");
+
+    // B's link can no longer flip the outcome: a reject POST is refused (no live entry).
+    const bLink = sent.find((s) => s.actor === "m:cto")!;
+    const bToken = new URL(bLink.url.replace(origin, base)).searchParams.get("token");
+    const bch = await getChallenge(base, bToken, "reject");
+    if (!bch.error) {
+      const bres = await record(base, bToken, "reject", bch, b.sign);
+      expect(bres.status).not.toBe(200); // reject is not recorded
+    }
+    expect((await adapter.awaitResolution(i)).decision).toBe("approve"); // outcome unchanged
+  });
+});
+
+describe("PendingDecisions finality (spec §4)", () => {
+  const policy = { rpId, allowedOrigins: [origin] };
+  /** Mint a passkey receipt exactly as the browser would (independent of the verifier). */
+  function passkeyReceiptFor(intentId: string, decision: "approve" | "reject", actor: string, credential: string, sign: (d: Buffer) => Buffer) {
+    const unsigned = unsignedReceipt(intentId, decision, actor, credential, new Date().toISOString());
+    const challenge = challengeFor(unsigned);
+    const authData = Buffer.concat([createHash("sha256").update(utf8(rpId)).digest(), Buffer.from([0x05]), Buffer.from([0, 0, 0, 1])]);
+    const clientData = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge, origin }), "utf8");
+    const signedData = Buffer.concat([authData, createHash("sha256").update(clientData).digest()]);
+    return { ...unsigned, signature: toB64url(sign(signedData)), webauthn: { authenticator_data: toB64url(authData), client_data_json: toB64url(clientData) } };
+  }
+
+  it("tombstones a resolved intent: a re-wait returns the decision, a late reject is ignored", async () => {
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const b = passkeyApprover("m:cto");
+    const i = intentWith([a.approver, b.approver], 1); // quorum 1
+    void pending.wait(i);
+
+    // A approves → quorum 1 → resolved.
+    expect(pending.record(passkeyReceiptFor(i.intent_id, "approve", "m:ceo", a.approver.public_key!, a.sign), policy)?.status).toBe("resolved");
+    expect(pending.has(i.intent_id)).toBe(false); // live entry gone
+
+    // A later B reject cannot record (no live entry) — the outcome is immutable.
+    expect(pending.record(passkeyReceiptFor(i.intent_id, "reject", "m:cto", b.approver.public_key!, b.sign), policy)).toBeNull();
+    // Finality: a re-wait returns the recorded approve, NOT a fresh reopenable entry.
+    await expect(pending.wait(i)).resolves.toMatchObject({ decision: "approve" });
+  });
+
+  it("keeps the finality tombstone (no early reap) when the deadline exceeds Node's timer ceiling", async () => {
+    // A deadline beyond ~24.8 days would clamp the reaper's setTimeout to ~1ms, reaping the
+    // tombstone almost immediately and reopening finality. The fix keeps the tombstone.
+    const pending = new PendingDecisions();
+    const a = passkeyApprover("m:ceo");
+    const b = passkeyApprover("m:cto");
+    const i = intentWith([a.approver, b.approver], 1);
+    (i as { created_at: string }).created_at = new Date(Date.now() + 40 * 24 * 3600_000).toISOString(); // deadline ~40 days out
+    void pending.wait(i);
+    expect(pending.record(passkeyReceiptFor(i.intent_id, "approve", "m:ceo", a.approver.public_key!, a.sign), policy)?.status).toBe("resolved");
+    await new Promise((r) => setTimeout(r, 20)); // let any wrongly-clamped ~1ms reaper fire
+    // Finality still holds: a late reject is ignored and a re-wait returns the approve.
+    expect(pending.record(passkeyReceiptFor(i.intent_id, "reject", "m:cto", b.approver.public_key!, b.sign), policy)).toBeNull();
+    await expect(pending.wait(i)).resolves.toMatchObject({ decision: "approve" });
+  });
+
+  it("finality is WALL-CLOCK gated, not timer-gated — a clock step cannot reopen a decided intent", async () => {
+    // A timer-based tombstone reaper fires on the MONOTONIC clock, so a backward wall-clock
+    // step (NTP / VM resume) could reap it while Date.now() is still before the deadline,
+    // letting a re-wait mint a fresh entry that an un-consumed approver then flips. The
+    // wall-clock gate cannot: it re-checks Date.now() vs the deadline on every wait().
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-06-01T00:00:00.000Z"));
+      const pending = new PendingDecisions();
+      const a = passkeyApprover("m:ceo");
+      const b = passkeyApprover("m:cto");
+      const i = intentWith([a.approver, b.approver], 1); // created_at = now, timeout 300s → deadline +5min
+      void pending.wait(i);
+      expect(pending.record(passkeyReceiptFor(i.intent_id, "approve", "m:ceo", a.approver.public_key!, a.sign), policy)?.status).toBe("resolved");
+
+      // Fire 10 min of MONOTONIC timers (a timer reaper scheduled at +5min would fire here),
+      // then set the WALL clock to only +2min — still inside the [created, deadline) window.
+      vi.advanceTimersByTime(10 * 60_000);
+      vi.setSystemTime(new Date("2026-06-01T00:02:00.000Z"));
+
+      // Re-wait must return the recorded approve, NOT mint a fresh reopenable entry…
+      const rewait = pending.wait(i);
+      // …so an un-consumed B reject finds no live entry and is ignored (would flip on a timer reopen).
+      expect(pending.record(passkeyReceiptFor(i.intent_id, "reject", "m:cto", b.approver.public_key!, b.sign), policy)).toBeNull();
+      await expect(rewait).resolves.toMatchObject({ decision: "approve" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

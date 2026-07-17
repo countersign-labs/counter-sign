@@ -7,7 +7,7 @@
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { generateKeypair, signBytes, toB64url, utf8, fromB64url } from "../src/core/keys.js";
-import { isWebAuthnCredential, verifyWebAuthnAssertion, type WebAuthnAssertion } from "../src/core/webauthn.js";
+import { isValidCredentialDescriptor, isWebAuthnCredential, verifyWebAuthnAssertion, type WebAuthnAssertion } from "../src/core/webauthn.js";
 
 const rpId = "approve.countersignlabs.com";
 const origin = `https://${rpId}`;
@@ -125,6 +125,54 @@ describe("verifyWebAuthnAssertion — negative (each check fails closed)", () =>
   it("rejects malformed inputs without throwing", () => {
     expect(verifyWebAuthnAssertion({ authenticator_data: "!!", client_data_json: "!!" }, "!!", opts("webauthn-ed25519:AAAA"))).toBe(false);
     expect(verifyWebAuthnAssertion(null as never, "", opts("x"))).toBe(false);
+  });
+
+  it("rejects Backup State set without Backup Eligibility (impossible flag combo, WebAuthn §verify)", () => {
+    // UP|BS but NOT BE (0x01|0x10 = 0x11): a non-backup-eligible credential cannot be
+    // backed up; the assertion is malformed and must fail even though it is well-signed.
+    const a = p256Assertion({ flags: 0x11 });
+    expect(verifyWebAuthnAssertion(a.assertion, a.signature, opts(a.credential))).toBe(false);
+    // UP|BE|BS (0x19) is the legitimate backed-up combo and still verifies.
+    const ok = p256Assertion({ flags: 0x19 });
+    expect(verifyWebAuthnAssertion(ok.assertion, ok.signature, opts(ok.credential))).toBe(true);
+  });
+
+  it("fails closed when allowedOrigins is a bare string (no substring matching)", () => {
+    // A JS caller (no compiler) passing a string instead of an array would otherwise get
+    // String.prototype.includes — SUBSTRING matching: `policyString.includes(origin)` is
+    // true whenever the assertion origin is a substring OF the policy string. So an
+    // attacker at a shorter look-alike domain ("…countersignlabs.co", a prefix of the
+    // real "…countersignlabs.com") would be accepted by the buggy code. The Array.isArray
+    // guard rejects any string policy outright, closing exactly that direction.
+    const a = ed25519Assertion({ client: { origin: "https://approve.countersignlabs.co" } });
+    expect("https://approve.countersignlabs.com".includes("https://approve.countersignlabs.co")).toBe(true); // the bug the guard closes
+    expect(verifyWebAuthnAssertion(a.assertion, a.signature, opts(a.credential, { allowedOrigins: origin as never }))).toBe(false);
+    // And a genuine origin with a string policy still fails closed (never substring-accepted).
+    const b = ed25519Assertion();
+    expect(verifyWebAuthnAssertion(b.assertion, b.signature, opts(b.credential, { allowedOrigins: origin as never }))).toBe(false);
+  });
+});
+
+describe("isValidCredentialDescriptor — structural well-formedness", () => {
+  it("accepts a real on-curve P-256 credential and a well-formed ed25519 descriptor", () => {
+    expect(isValidCredentialDescriptor(p256Assertion().credential)).toBe(true);
+    expect(isValidCredentialDescriptor(`webauthn-ed25519:${generateKeypair().publicKey}`)).toBe(true);
+  });
+
+  it("accepts a well-formed-length OFF-CURVE P-256 point structurally (curve check is at verify time)", () => {
+    // This predicate is STRUCTURAL (used by intent construction + audit replay), so it must
+    // NOT reject an off-curve point — doing so would retroactively invalidate historical
+    // records. An off-curve point is harmless: it can never produce a passing assertion.
+    const offCurve = `webauthn-p256:${toB64url(Buffer.concat([Buffer.from([0x04]), Buffer.alloc(64, 0)]))}`;
+    expect(isValidCredentialDescriptor(offCurve)).toBe(true);
+  });
+
+  it("an OFF-CURVE P-256 credential can never verify an assertion (rejected at the crypto layer, fail-closed)", () => {
+    // The security property: even though the descriptor is structurally valid, no assertion
+    // signed for it verifies, because createPublicKey rejects the point. A dead key cannot forge.
+    const offCurve = `webauthn-p256:${toB64url(Buffer.concat([Buffer.from([0x04]), Buffer.alloc(64, 0)]))}`;
+    const a = p256Assertion(); // a real assertion, presented under the off-curve descriptor
+    expect(verifyWebAuthnAssertion(a.assertion, a.signature, opts(offCurve))).toBe(false);
   });
 });
 

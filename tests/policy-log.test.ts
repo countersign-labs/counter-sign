@@ -151,4 +151,69 @@ describe("PolicyLog.verifyChain", () => {
     const signature = signContext(rootA.secretKey, POLICY_CONTEXT, canonicalPolicyEntry(unsigned));
     expect(new PolicyLog([...log.entries, { ...unsigned, signature }]).verifyChain()).toBe(false);
   });
+
+  it("rejects a seq gap/duplicate", () => {
+    const log = bootstrapped();
+    log.append({ kind: "role-set", role }, rootA.secretKey);
+    const entries = JSON.parse(JSON.stringify(log.entries)) as PolicyEntry[];
+    entries[1].seq = 5; // was 1 — the seq-contiguity check must fire before signature is even considered
+    expect(new PolicyLog(entries).verifyChain()).toBe(false);
+  });
+
+  it("rejects a genesis entry where the signer is not the key being added", () => {
+    // Signature verifies fine (Y really did sign it) — only the genesis self-sign
+    // invariant (added key === signer) is what must catch this.
+    const x = generateKeypair();
+    const y = generateKeypair();
+    const unsigned = {
+      countersign: "0.2" as const, seq: 0,
+      change: { kind: "admin-add" as const, org: "o1", public_key: x.publicKey, name: "root" },
+      issued_at: "2026-01-01T00:00:00.000Z", prev: null, signer_public_key: y.publicKey,
+    };
+    const signature = signContext(y.secretKey, POLICY_CONTEXT, canonicalPolicyEntry(unsigned));
+    expect(new PolicyLog([{ ...unsigned, signature }]).verifyChain()).toBe(false);
+  });
+
+  it("rejects a forged admin-revoke targeting a key that was never an admin", () => {
+    const log = bootstrapped(); // rootA
+    log.append({ kind: "admin-add", org: "o1", public_key: adminB.publicKey, name: "b" }, rootA.secretKey); // rootA, adminB
+    const neverAdmin = generateKeypair();
+    const prev = hashEntry(log.entries[log.entries.length - 1]);
+    const unsigned = {
+      countersign: "0.2" as const, seq: 2,
+      change: { kind: "admin-revoke" as const, org: "o1", public_key: neverAdmin.publicKey },
+      issued_at: "2026-01-01T00:00:00.000Z", prev, signer_public_key: rootA.publicKey,
+    };
+    const signature = signContext(rootA.secretKey, POLICY_CONTEXT, canonicalPolicyEntry(unsigned));
+    expect(new PolicyLog([...log.entries, { ...unsigned, signature }]).verifyChain()).toBe(false);
+  });
+
+  it("rejects a historical revoke of the last remaining admin", () => {
+    const log = bootstrapped(); // rootA only, 1 admin
+    const prev = hashEntry(log.entries[0]);
+    const unsigned = {
+      countersign: "0.2" as const, seq: 1,
+      change: { kind: "admin-revoke" as const, org: "o1", public_key: rootA.publicKey },
+      issued_at: "2026-01-01T00:00:00.000Z", prev, signer_public_key: rootA.publicKey,
+    };
+    const signature = signContext(rootA.secretKey, POLICY_CONTEXT, canonicalPolicyEntry(unsigned));
+    expect(new PolicyLog([...log.entries, { ...unsigned, signature }]).verifyChain()).toBe(false);
+  });
+
+  it("is a total function: returns false (never throws) on a malformed entry", () => {
+    const log = bootstrapped();
+    const prev = hashEntry(log.entries[0]);
+    // Built as a raw literal (not via canonicalPolicyEntry/signContext, which would
+    // themselves throw on the NaN) — the bogus signature is never reached because
+    // canonicalize throws first, inside verifyChain's own try/catch.
+    const malformed: PolicyEntry = {
+      countersign: "0.2", seq: 1,
+      change: { kind: "rule-set", rule: { ...rule, quorum: NaN as never } },
+      issued_at: "2026-01-01T00:00:00.000Z", prev, signer_public_key: rootA.publicKey,
+      signature: "sig",
+    };
+    const badLog = new PolicyLog([...log.entries, malformed]);
+    expect(() => badLog.verifyChain()).not.toThrow();
+    expect(badLog.verifyChain()).toBe(false);
+  });
 });

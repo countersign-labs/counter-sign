@@ -1,5 +1,5 @@
 import { getState } from "../../lib/state";
-import { VerifyBanner, Empty, table, th, td } from "../ui";
+import { VerifyBanner, Empty } from "../ui";
 import { NewRuleForm } from "./new-rule";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +8,8 @@ export default function RulesPage() {
   const s = getState();
   return (
     <div>
-      <h1 style={{ marginTop: 0 }}>Rules{s.org && ` — ${s.org}`}</h1>
-      <p style={{ color: "#555" }}>
+      <h1>Rules{s.org && ` — ${s.org}`}</h1>
+      <p className="muted">
         Named approval policies an agent references. A rule resolves to a signed Intent:
         which roles must approve, the quorum, the default on no-confirmation, and the review window.
       </p>
@@ -18,28 +18,28 @@ export default function RulesPage() {
       {s.rules.length === 0 ? (
         <Empty>No rules defined yet.</Empty>
       ) : (
-        <table style={table}>
+        <table className="cs">
           <thead>
             <tr>
-              <th style={th}>Name</th>
-              <th style={th}>Roles</th>
-              <th style={th}>Quorum</th>
-              <th style={th}>Default</th>
-              <th style={th}>Window</th>
-              <th style={th}>Action</th>
-              <th style={th}>Risk</th>
+              <th>Name</th>
+              <th>Roles</th>
+              <th>Quorum</th>
+              <th>Default</th>
+              <th>Window</th>
+              <th>Action</th>
+              <th>Risk</th>
             </tr>
           </thead>
           <tbody>
             {s.rules.map((r) => (
               <tr key={r.id}>
-                <td style={td}>{r.name}</td>
-                <td style={td}>{r.roles.join(", ")}</td>
-                <td style={td}>{r.quorum}</td>
-                <td style={{ ...td, color: r.default === "approve" ? "#0a7d33" : "#b3261e" }}>{r.default}</td>
-                <td style={td}>{formatWindow(r.timeout_seconds)}</td>
-                <td style={td}>{r.action ?? "—"}</td>
-                <td style={td}>{r.risk_tier ?? "—"}</td>
+                <td>{r.name}</td>
+                <td>{r.roles.join(", ")}</td>
+                <td>{r.quorum}</td>
+                <td className={r.default === "approve" ? "ok" : "bad"}>{r.default}</td>
+                <td>{formatWindow(r.timeout_seconds)}</td>
+                <td className="mono">{r.action ?? "—"}</td>
+                <td>{r.risk_tier ?? "—"}</td>
               </tr>
             ))}
           </tbody>

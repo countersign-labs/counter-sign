@@ -60,7 +60,7 @@ export function NewRuleForm({ org, roleIds }: { org: string; roleIds: string[] }
   }
 
   const field = { display: "block", margin: "0.4rem 0", width: "100%", maxWidth: "24rem", padding: "0.35rem" };
-  const label = { display: "block", fontSize: "0.85rem", color: "#444", marginTop: "0.6rem" };
+  const label = { display: "block", fontSize: "0.85rem", marginTop: "0.6rem" };
 
   return (
     <details style={{ margin: "1.5rem 0", border: "1px solid #e2e2e2", borderRadius: "0.5rem", padding: "1rem" }}>

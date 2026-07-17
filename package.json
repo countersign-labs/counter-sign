@@ -1,6 +1,6 @@
 {
   "name": "@countersignlabs/counter-sign",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Open protocol for agent-to-human authorization. An agent signs its intent; a human countersigns it into authority.",
   "license": "Apache-2.0",
   "author": "Haridarman Kumaresan",

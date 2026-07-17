@@ -127,9 +127,13 @@ export class PolicyLog implements PolicyStore {
 
   /** Walk the chain: contiguous seq, correct prev links, self-signed admin-add genesis,
    *  every entry signed by a key active as an admin immediately before it, every entry's
-   *  change belongs to the genesis org (single-org invariant), and the last-admin
-   *  invariant held historically. Total — never throws; returns false on any break. */
-  verifyChain(): boolean {
+   *  change belongs to the genesis org (single-org invariant), every role-set/rule-set
+   *  change satisfies validateRole/validateRule (parity with append's assertChangeValid),
+   *  and the last-admin invariant held historically. Total — never throws; returns false
+   *  on any break. If `expectedHead` is given, also fails unless the log's current head
+   *  (length + tip hash) matches it exactly — detects rollback/tail-truncation against an
+   *  externally-anchored head (mirrors ApproverRegistry.verifyChain). */
+  verifyChain(expectedHead?: { length: number; hash: string }): boolean {
     try {
       const admins = new Map<string, AdminKey>();
       let prevHash: string | null = null;
@@ -156,13 +160,27 @@ export class PolicyLog implements PolicyStore {
           if (!admins.has(c.public_key)) return false; // revoke of a never-active key — impossible via append()
           if (admins.size <= 1) return false;            // last-admin invariant (already present)
           admins.delete(c.public_key);
+        } else if (c.kind === "role-set") {
+          validateRole(c.role); // parity with append()'s assertChangeValid
+        } else if (c.kind === "rule-set") {
+          validateRule(c.rule); // parity with append()'s assertChangeValid
         }
         prevHash = hashEntry(e);
+      }
+      if (expectedHead) {
+        if (expectedHead.length !== this._entries.length) return false;
+        if (expectedHead.hash !== this.head().hash) return false;
       }
       return true;
     } catch {
       return false;
     }
+  }
+
+  /** PolicyStore.verify: fail-closed chain verification, optionally anchored to a
+   *  trusted head (see verifyChain). */
+  verify(expectedHead?: { length: number; hash: string }): boolean {
+    return this.verifyChain(expectedHead);
   }
 
   state(): PolicyState {

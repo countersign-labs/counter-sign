@@ -14,6 +14,9 @@ import type { ResolveDeps, RuleRequest } from "./types.js";
  * a member with no active enrollment fails closed. Pure; never mints an Intent itself.
  */
 export function resolveRule(ruleName: string, request: RuleRequest, deps: ResolveDeps): IntentFields {
+  if (!deps.store.verify())
+    throw new CountersignError("policy store failed chain verification — refusing to resolve a rule from an unverified or tampered policy log");
+
   const rule = deps.store.getRule(deps.org, ruleName);
   if (!rule) throw new CountersignError(`no rule named "${ruleName}" for org ${deps.org}`);
   validateRule(rule);

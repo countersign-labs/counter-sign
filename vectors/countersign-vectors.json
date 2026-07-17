@@ -1,0 +1,647 @@
+{
+  "format": "counter-sign conformance test vectors",
+  "version": "0.2",
+  "generated_by": "scripts/gen-vectors.ts (deterministic; re-run npm run gen:vectors to reproduce byte-for-byte)",
+  "warning": "TEST KEYS — low-entropy, public, DO NOT USE for anything real.",
+  "spec": "spec/countersign-spec.md",
+  "algorithm": {
+    "signature": "ed25519 (RFC 8032, deterministic)",
+    "key_encoding": "base64url of the raw 32-byte value (seed for secret, public key for public)",
+    "canonical_json": "object keys sorted lexicographically at every depth by UTF-16 code unit; no insignificant whitespace; UTF-8 bytes; `undefined` members omitted; non-finite numbers rejected",
+    "signed_bytes": "utf8(`${context}\\n${canonical}`) — the domain-separation context, a single 0x0A, then the canonical JSON of the unsigned object",
+    "contexts": {
+      "intent": "countersign-intent-v0.2",
+      "countersignature": "countersign-countersignature-v0.2",
+      "link": "countersign-link-v0.2"
+    },
+    "receipt_chain": {
+      "genesis_prev": "PrBqhfalicS0y0uzwtuDYW-mJI64rf1pETxbitvmrUk",
+      "genesis_preimage": "utf8(\"countersign-receipt-chain-v0.1\")",
+      "entry": "{ seq, prev, receipt } — seq is 0-based; prev is the previous entry's hash (genesis for seq 0)",
+      "entry_hash": "base64url( sha256( utf8( canonical_json(entry) ) ) )",
+      "head_hash": "the last entry's hash, or genesis_prev for an empty log"
+    }
+  },
+  "keys": [
+    {
+      "name": "agent",
+      "secret": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "public": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+    },
+    {
+      "name": "authority",
+      "secret": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+      "public": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q"
+    },
+    {
+      "name": "org",
+      "secret": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+      "public": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E"
+    },
+    {
+      "name": "ceo",
+      "secret": "ERERERERERERERERERERERERERERERERERERERERERE",
+      "public": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+    },
+    {
+      "name": "cto",
+      "secret": "EhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhI",
+      "public": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE"
+    },
+    {
+      "name": "rogue",
+      "secret": "__________________________________________8",
+      "public": "dqFZIESm5PURJlvKc6YE2QsFKdHfYCvjChmpJXZg0fU"
+    }
+  ],
+  "canonical": [
+    {
+      "name": "empty-object",
+      "value": {},
+      "canonical": "{}"
+    },
+    {
+      "name": "key-ordering",
+      "value": {
+        "c": 3,
+        "a": 1,
+        "b": 2
+      },
+      "canonical": "{\"a\":1,\"b\":2,\"c\":3}"
+    },
+    {
+      "name": "nested-and-arrays",
+      "value": {
+        "z": [
+          3,
+          2,
+          1
+        ],
+        "a": {
+          "y": true,
+          "x": null
+        }
+      },
+      "canonical": "{\"a\":{\"x\":null,\"y\":true},\"z\":[3,2,1]}"
+    },
+    {
+      "name": "undefined-omitted",
+      "value": {
+        "a": 1,
+        "c": 3
+      },
+      "canonical": "{\"a\":1,\"c\":3}"
+    },
+    {
+      "name": "unicode-string",
+      "value": {
+        "s": "café — 日本語 — \"quotes\" & <tags>"
+      },
+      "canonical": "{\"s\":\"café — 日本語 — \\\"quotes\\\" & <tags>\"}"
+    },
+    {
+      "name": "integers-and-negative",
+      "value": {
+        "n": 0,
+        "neg": -1000000,
+        "big": 9007199254740991
+      },
+      "canonical": "{\"big\":9007199254740991,\"n\":0,\"neg\":-1000000}"
+    }
+  ],
+  "signing": [
+    {
+      "name": "signContext-sample",
+      "secret_key": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+      "public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+      "context": "countersign-countersignature-v0.2",
+      "canonical": "{\"hello\":\"world\",\"n\":42}",
+      "message_base64url": "Y291bnRlcnNpZ24tY291bnRlcnNpZ25hdHVyZS12MC4yCnsiaGVsbG8iOiJ3b3JsZCIsIm4iOjQyfQ",
+      "signature": "L2HKP3Uh-47l1xAr545-I54F1My3biLqGQ3LVahaN5LpyT7bRmnBiI78DPg3SP8O6fKnPxBZBzrCZDDnGOraCg"
+    }
+  ],
+  "intents": [
+    {
+      "name": "vouched-quorum-1",
+      "agent_public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+      "context": "countersign-intent-v0.2",
+      "canonical_unsigned": "{\"action\":\"billing.refund\",\"agent\":{\"id\":\"agent:vectors\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w\"},\"approvers\":[{\"actor\":\"tg:alice\",\"mode\":\"vouched\"}],\"callback\":null,\"countersign\":\"0.2\",\"created_at\":\"2026-01-01T00:00:00.000Z\",\"default\":\"reject\",\"intent_id\":\"11111111-1111-4111-8111-111111111111\",\"quorum\":1,\"risk_tier\":\"high\",\"summary\":\"Refund $42.00 to customer 8675309\",\"timeout\":300}",
+      "valid": true,
+      "intent": {
+        "countersign": "0.2",
+        "intent_id": "11111111-1111-4111-8111-111111111111",
+        "agent": {
+          "id": "agent:vectors",
+          "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+        },
+        "action": "billing.refund",
+        "summary": "Refund $42.00 to customer 8675309",
+        "risk_tier": "high",
+        "approvers": [
+          {
+            "actor": "tg:alice",
+            "mode": "vouched"
+          }
+        ],
+        "quorum": 1,
+        "timeout": 300,
+        "default": "reject",
+        "callback": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "signature": "oTbIg9175aeo8MFnPqfL8os9drTUtcOn_DQzo2VWadJFtxw5vzH753R74Q87mFz9dz51wOh5ghCF2LTp3BUJDg"
+      }
+    },
+    {
+      "name": "keyed-quorum-2",
+      "agent_public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+      "context": "countersign-intent-v0.2",
+      "canonical_unsigned": "{\"action\":\"prod.deploy\",\"agent\":{\"id\":\"agent:vectors\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w\"},\"approvers\":[{\"actor\":\"m:ceo\",\"mode\":\"keyed\",\"public_key\":\"0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc\"},{\"actor\":\"m:cto\",\"mode\":\"keyed\",\"public_key\":\"IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE\"}],\"callback\":null,\"countersign\":\"0.2\",\"created_at\":\"2026-01-01T00:00:00.000Z\",\"default\":\"reject\",\"intent_id\":\"22222222-2222-4222-8222-222222222222\",\"quorum\":2,\"risk_tier\":\"critical\",\"summary\":\"Deploy 2.4.0 to production\",\"timeout\":300}",
+      "valid": true,
+      "intent": {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "agent": {
+          "id": "agent:vectors",
+          "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+        },
+        "action": "prod.deploy",
+        "summary": "Deploy 2.4.0 to production",
+        "risk_tier": "critical",
+        "approvers": [
+          {
+            "actor": "m:ceo",
+            "mode": "keyed",
+            "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+          },
+          {
+            "actor": "m:cto",
+            "mode": "keyed",
+            "public_key": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE"
+          }
+        ],
+        "quorum": 2,
+        "timeout": 300,
+        "default": "reject",
+        "callback": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "signature": "oHbYFBNfKAZN0jvh9lKmzdQp_jxNkvtwsQY8zwgXPFM3AyLwdpqYWMi34G206yFxEblYOTAlNqLZ6ciNPpShBA"
+      }
+    },
+    {
+      "name": "tampered-summary",
+      "agent_public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+      "context": "countersign-intent-v0.2",
+      "canonical_unsigned": "{\"action\":\"billing.refund\",\"agent\":{\"id\":\"agent:vectors\",\"public_key\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w\"},\"approvers\":[{\"actor\":\"tg:alice\",\"mode\":\"vouched\"}],\"callback\":null,\"countersign\":\"0.2\",\"created_at\":\"2026-01-01T00:00:00.000Z\",\"default\":\"reject\",\"intent_id\":\"11111111-1111-4111-8111-111111111111\",\"quorum\":1,\"risk_tier\":\"high\",\"summary\":\"Refund $42.00 to customer 8675309 (edited)\",\"timeout\":300}",
+      "valid": false,
+      "note": "summary edited after signing; canonical_unsigned no longer matches the signed bytes",
+      "intent": {
+        "countersign": "0.2",
+        "intent_id": "11111111-1111-4111-8111-111111111111",
+        "agent": {
+          "id": "agent:vectors",
+          "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+        },
+        "action": "billing.refund",
+        "summary": "Refund $42.00 to customer 8675309 (edited)",
+        "risk_tier": "high",
+        "approvers": [
+          {
+            "actor": "tg:alice",
+            "mode": "vouched"
+          }
+        ],
+        "quorum": 1,
+        "timeout": 300,
+        "default": "reject",
+        "callback": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "signature": "oTbIg9175aeo8MFnPqfL8os9drTUtcOn_DQzo2VWadJFtxw5vzH753R74Q87mFz9dz51wOh5ghCF2LTp3BUJDg"
+      }
+    }
+  ],
+  "countersignatures": [
+    {
+      "name": "vouched-approve",
+      "signer_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+      "context": "countersign-countersignature-v0.2",
+      "valid": true,
+      "receipt": {
+        "countersign": "0.2",
+        "intent_id": "11111111-1111-4111-8111-111111111111",
+        "decision": "approve",
+        "actor": "tg:alice",
+        "policy": "approver",
+        "timestamp": "2026-01-01T00:01:00.000Z",
+        "public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "signature": "LxKvDwqMaH8SHwHq5vaP38IPTH-_Vbmld32Hr3PX0meo2r05NVTMEglrN-ZFTS2bGZ0qSr0BMH214-wUp021BQ"
+      }
+    },
+    {
+      "name": "keyed-approve-ceo",
+      "signer_public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+      "context": "countersign-countersignature-v0.2",
+      "valid": true,
+      "receipt": {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "decision": "approve",
+        "actor": "m:ceo",
+        "policy": "approver",
+        "timestamp": "2026-01-01T00:01:00.000Z",
+        "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "signature": "Pa_mg32VCt7wk10t_3v-L68IRPGSqJdB8KjfsgUArYjVt8KjHmSbXBDlMI5KkcphoDiQOSgrDyG-NQBdw5ETBA"
+      }
+    },
+    {
+      "name": "keyed-approve-cto",
+      "signer_public_key": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE",
+      "context": "countersign-countersignature-v0.2",
+      "valid": true,
+      "receipt": {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "decision": "approve",
+        "actor": "m:cto",
+        "policy": "approver",
+        "timestamp": "2026-01-01T00:01:00.000Z",
+        "public_key": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE",
+        "signature": "Y6CReEQ-ExprObWekDVz2_w5mWdK-LXm6FRQ5PzoStSiGFh5A3gB0UKQwSLivMoHSq4782o04goKcyhUDMnVAg"
+      }
+    },
+    {
+      "name": "timeout-default-reject",
+      "signer_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+      "context": "countersign-countersignature-v0.2",
+      "valid": true,
+      "receipt": {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "decision": "reject",
+        "actor": "default:timeout",
+        "policy": "default",
+        "timestamp": "2026-01-01T00:05:00.000Z",
+        "public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "signature": "OuZBHaRSkxo0JW9L1IubSxftcqZoGw0iZcjWQiJWaSzNqZ7_F5Y2HJIfproXhIxldAHzRhjhcNZGA0rjtFkyCg"
+      }
+    },
+    {
+      "name": "forged-wrong-key",
+      "signer_public_key": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE",
+      "context": "countersign-countersignature-v0.2",
+      "valid": false,
+      "note": "receipt claims m:cto but is signed by the rogue key; must NOT verify against m:cto's public key",
+      "receipt": {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "decision": "approve",
+        "actor": "m:cto",
+        "policy": "approver",
+        "timestamp": "2026-01-01T00:01:00.000Z",
+        "public_key": "dqFZIESm5PURJlvKc6YE2QsFKdHfYCvjChmpJXZg0fU",
+        "signature": "_9bJwI_BO1pJKCOcNncR9Nj-NAQw83NKjQlJkTVbtEPLVp9ndnKCadk6o-PiLHyUqhjT7g8dQ0rwV3KgczJiAA"
+      }
+    }
+  ],
+  "resolutions": [
+    {
+      "name": "keyed-2of2-approve",
+      "expect": "valid",
+      "expected_authority_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+      "intent": {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "agent": {
+          "id": "agent:vectors",
+          "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+        },
+        "action": "prod.deploy",
+        "summary": "Deploy 2.4.0 to production",
+        "risk_tier": "critical",
+        "approvers": [
+          {
+            "actor": "m:ceo",
+            "mode": "keyed",
+            "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+          },
+          {
+            "actor": "m:cto",
+            "mode": "keyed",
+            "public_key": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE"
+          }
+        ],
+        "quorum": 2,
+        "timeout": 300,
+        "default": "reject",
+        "callback": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "signature": "oHbYFBNfKAZN0jvh9lKmzdQp_jxNkvtwsQY8zwgXPFM3AyLwdpqYWMi34G206yFxEblYOTAlNqLZ6ciNPpShBA"
+      },
+      "resolution": {
+        "decision": "approve",
+        "policy": "approver",
+        "countersignatures": [
+          {
+            "countersign": "0.2",
+            "intent_id": "22222222-2222-4222-8222-222222222222",
+            "decision": "approve",
+            "actor": "m:ceo",
+            "policy": "approver",
+            "timestamp": "2026-01-01T00:01:00.000Z",
+            "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+            "signature": "Pa_mg32VCt7wk10t_3v-L68IRPGSqJdB8KjfsgUArYjVt8KjHmSbXBDlMI5KkcphoDiQOSgrDyG-NQBdw5ETBA"
+          },
+          {
+            "countersign": "0.2",
+            "intent_id": "22222222-2222-4222-8222-222222222222",
+            "decision": "approve",
+            "actor": "m:cto",
+            "policy": "approver",
+            "timestamp": "2026-01-01T00:01:00.000Z",
+            "public_key": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE",
+            "signature": "Y6CReEQ-ExprObWekDVz2_w5mWdK-LXm6FRQ5PzoStSiGFh5A3gB0UKQwSLivMoHSq4782o04goKcyhUDMnVAg"
+          }
+        ]
+      }
+    },
+    {
+      "name": "vouched-approve",
+      "expect": "valid",
+      "expected_authority_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+      "intent": {
+        "countersign": "0.2",
+        "intent_id": "11111111-1111-4111-8111-111111111111",
+        "agent": {
+          "id": "agent:vectors",
+          "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+        },
+        "action": "billing.refund",
+        "summary": "Refund $42.00 to customer 8675309",
+        "risk_tier": "high",
+        "approvers": [
+          {
+            "actor": "tg:alice",
+            "mode": "vouched"
+          }
+        ],
+        "quorum": 1,
+        "timeout": 300,
+        "default": "reject",
+        "callback": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "signature": "oTbIg9175aeo8MFnPqfL8os9drTUtcOn_DQzo2VWadJFtxw5vzH753R74Q87mFz9dz51wOh5ghCF2LTp3BUJDg"
+      },
+      "resolution": {
+        "decision": "approve",
+        "policy": "approver",
+        "countersignatures": [
+          {
+            "countersign": "0.2",
+            "intent_id": "11111111-1111-4111-8111-111111111111",
+            "decision": "approve",
+            "actor": "tg:alice",
+            "policy": "approver",
+            "timestamp": "2026-01-01T00:01:00.000Z",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+            "signature": "LxKvDwqMaH8SHwHq5vaP38IPTH-_Vbmld32Hr3PX0meo2r05NVTMEglrN-ZFTS2bGZ0qSr0BMH214-wUp021BQ"
+          }
+        ]
+      }
+    },
+    {
+      "name": "timeout-default",
+      "expect": "valid",
+      "expected_authority_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+      "intent": {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "agent": {
+          "id": "agent:vectors",
+          "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+        },
+        "action": "prod.deploy",
+        "summary": "Deploy 2.4.0 to production",
+        "risk_tier": "critical",
+        "approvers": [
+          {
+            "actor": "m:ceo",
+            "mode": "keyed",
+            "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+          },
+          {
+            "actor": "m:cto",
+            "mode": "keyed",
+            "public_key": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE"
+          }
+        ],
+        "quorum": 2,
+        "timeout": 300,
+        "default": "reject",
+        "callback": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "signature": "oHbYFBNfKAZN0jvh9lKmzdQp_jxNkvtwsQY8zwgXPFM3AyLwdpqYWMi34G206yFxEblYOTAlNqLZ6ciNPpShBA"
+      },
+      "resolution": {
+        "decision": "reject",
+        "policy": "default",
+        "countersignatures": [
+          {
+            "countersign": "0.2",
+            "intent_id": "22222222-2222-4222-8222-222222222222",
+            "decision": "reject",
+            "actor": "default:timeout",
+            "policy": "default",
+            "timestamp": "2026-01-01T00:05:00.000Z",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+            "signature": "OuZBHaRSkxo0JW9L1IubSxftcqZoGw0iZcjWQiJWaSzNqZ7_F5Y2HJIfproXhIxldAHzRhjhcNZGA0rjtFkyCg"
+          }
+        ]
+      }
+    },
+    {
+      "name": "under-quorum",
+      "expect": "invalid",
+      "note": "only 1 of 2 required keyed approvals",
+      "expected_authority_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+      "intent": {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "agent": {
+          "id": "agent:vectors",
+          "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+        },
+        "action": "prod.deploy",
+        "summary": "Deploy 2.4.0 to production",
+        "risk_tier": "critical",
+        "approvers": [
+          {
+            "actor": "m:ceo",
+            "mode": "keyed",
+            "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+          },
+          {
+            "actor": "m:cto",
+            "mode": "keyed",
+            "public_key": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE"
+          }
+        ],
+        "quorum": 2,
+        "timeout": 300,
+        "default": "reject",
+        "callback": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "signature": "oHbYFBNfKAZN0jvh9lKmzdQp_jxNkvtwsQY8zwgXPFM3AyLwdpqYWMi34G206yFxEblYOTAlNqLZ6ciNPpShBA"
+      },
+      "resolution": {
+        "decision": "approve",
+        "policy": "approver",
+        "countersignatures": [
+          {
+            "countersign": "0.2",
+            "intent_id": "22222222-2222-4222-8222-222222222222",
+            "decision": "approve",
+            "actor": "m:ceo",
+            "policy": "approver",
+            "timestamp": "2026-01-01T00:01:00.000Z",
+            "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+            "signature": "Pa_mg32VCt7wk10t_3v-L68IRPGSqJdB8KjfsgUArYjVt8KjHmSbXBDlMI5KkcphoDiQOSgrDyG-NQBdw5ETBA"
+          }
+        ]
+      }
+    },
+    {
+      "name": "forged-quorum",
+      "expect": "invalid",
+      "note": "m:cto's slot signed by the rogue key",
+      "expected_authority_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+      "intent": {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "agent": {
+          "id": "agent:vectors",
+          "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+        },
+        "action": "prod.deploy",
+        "summary": "Deploy 2.4.0 to production",
+        "risk_tier": "critical",
+        "approvers": [
+          {
+            "actor": "m:ceo",
+            "mode": "keyed",
+            "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+          },
+          {
+            "actor": "m:cto",
+            "mode": "keyed",
+            "public_key": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE"
+          }
+        ],
+        "quorum": 2,
+        "timeout": 300,
+        "default": "reject",
+        "callback": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "signature": "oHbYFBNfKAZN0jvh9lKmzdQp_jxNkvtwsQY8zwgXPFM3AyLwdpqYWMi34G206yFxEblYOTAlNqLZ6ciNPpShBA"
+      },
+      "resolution": {
+        "decision": "approve",
+        "policy": "approver",
+        "countersignatures": [
+          {
+            "countersign": "0.2",
+            "intent_id": "22222222-2222-4222-8222-222222222222",
+            "decision": "approve",
+            "actor": "m:ceo",
+            "policy": "approver",
+            "timestamp": "2026-01-01T00:01:00.000Z",
+            "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+            "signature": "Pa_mg32VCt7wk10t_3v-L68IRPGSqJdB8KjfsgUArYjVt8KjHmSbXBDlMI5KkcphoDiQOSgrDyG-NQBdw5ETBA"
+          },
+          {
+            "countersign": "0.2",
+            "intent_id": "22222222-2222-4222-8222-222222222222",
+            "decision": "approve",
+            "actor": "m:cto",
+            "policy": "approver",
+            "timestamp": "2026-01-01T00:01:00.000Z",
+            "public_key": "dqFZIESm5PURJlvKc6YE2QsFKdHfYCvjChmpJXZg0fU",
+            "signature": "_9bJwI_BO1pJKCOcNncR9Nj-NAQw83NKjQlJkTVbtEPLVp9ndnKCadk6o-PiLHyUqhjT7g8dQ0rwV3KgczJiAA"
+          }
+        ]
+      }
+    },
+    {
+      "name": "wrong-authority-key",
+      "expect": "invalid",
+      "note": "vouched receipt verified against the wrong authority key",
+      "expected_authority_public_key": "dqFZIESm5PURJlvKc6YE2QsFKdHfYCvjChmpJXZg0fU",
+      "intent": {
+        "countersign": "0.2",
+        "intent_id": "11111111-1111-4111-8111-111111111111",
+        "agent": {
+          "id": "agent:vectors",
+          "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+        },
+        "action": "billing.refund",
+        "summary": "Refund $42.00 to customer 8675309",
+        "risk_tier": "high",
+        "approvers": [
+          {
+            "actor": "tg:alice",
+            "mode": "vouched"
+          }
+        ],
+        "quorum": 1,
+        "timeout": 300,
+        "default": "reject",
+        "callback": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "signature": "oTbIg9175aeo8MFnPqfL8os9drTUtcOn_DQzo2VWadJFtxw5vzH753R74Q87mFz9dz51wOh5ghCF2LTp3BUJDg"
+      },
+      "resolution": {
+        "decision": "approve",
+        "policy": "approver",
+        "countersignatures": [
+          {
+            "countersign": "0.2",
+            "intent_id": "11111111-1111-4111-8111-111111111111",
+            "decision": "approve",
+            "actor": "tg:alice",
+            "policy": "approver",
+            "timestamp": "2026-01-01T00:01:00.000Z",
+            "public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+            "signature": "LxKvDwqMaH8SHwHq5vaP38IPTH-_Vbmld32Hr3PX0meo2r05NVTMEglrN-ZFTS2bGZ0qSr0BMH214-wUp021BQ"
+          }
+        ]
+      }
+    }
+  ],
+  "chain": {
+    "note": "append these receipts in order to a fresh hash-chained ReceiptLog; head() must equal expected_head",
+    "receipts": [
+      {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "decision": "approve",
+        "actor": "m:ceo",
+        "policy": "approver",
+        "timestamp": "2026-01-01T00:01:00.000Z",
+        "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+        "signature": "Pa_mg32VCt7wk10t_3v-L68IRPGSqJdB8KjfsgUArYjVt8KjHmSbXBDlMI5KkcphoDiQOSgrDyG-NQBdw5ETBA"
+      },
+      {
+        "countersign": "0.2",
+        "intent_id": "22222222-2222-4222-8222-222222222222",
+        "decision": "approve",
+        "actor": "m:cto",
+        "policy": "approver",
+        "timestamp": "2026-01-01T00:01:00.000Z",
+        "public_key": "IEBA42TBDyvsnB_lAKHNTCR8idZQoB7X6CyrqGeHfCE",
+        "signature": "Y6CReEQ-ExprObWekDVz2_w5mWdK-LXm6FRQ5PzoStSiGFh5A3gB0UKQwSLivMoHSq4782o04goKcyhUDMnVAg"
+      }
+    ],
+    "expected_head": {
+      "length": 2,
+      "hash": "jMmIjAZqtC0iuoxf543Tkv4vXQLvkLqKtQ93iiaSRic"
+    }
+  }
+}

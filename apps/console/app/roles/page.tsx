@@ -1,5 +1,6 @@
 import { getState } from "../../lib/state";
 import { VerifyBanner, Empty, table, th, td } from "../ui";
+import { NewRoleForm } from "./new-role";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ export default function RolesPage() {
       <h1 style={{ marginTop: 0 }}>Roles{s.org && ` — ${s.org}`}</h1>
       <p style={{ color: "#555" }}>Named groups of approvers. Rules reference roles.</p>
       <VerifyBanner state={s} />
+      <NewRoleForm org={s.org || "acme"} approverActors={s.approvers.map((a) => a.actor)} />
       {s.roles.length === 0 ? (
         <Empty>No roles defined yet.</Empty>
       ) : (

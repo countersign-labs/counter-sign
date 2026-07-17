@@ -14,12 +14,13 @@
 // verifies each self-signed passkey receipt against the approver's OWN bound key,
 // so — like every keyed path — a compromised authority server cannot forge it.
 //
-// @experimental — the browser-passkey web-delivery CHANNEL is still stabilizing. The
-// SECURITY guarantees are the same as every keyed path (the server holds no approver
-// key), but this async delivery/collection glue is not yet frozen. For production keyed
-// approvals today, prefer raw-ed25519 approvers signing with the `approve` CLI (stable),
-// or vouched approvers via the chat/email adapters. The core protocol does not depend
-// on this adapter.
+// Stable: the delivery/collection contract is frozen — deliver() fails closed
+// on total delivery failure (and on ANY failure under default:"approve"), a decision that
+// lands mid-delivery is never lost, and awaitResolution() is idempotent while the Intent
+// is live. The SECURITY guarantees are the same as every keyed path: the server holds no
+// approver key, so a compromised authority cannot forge a passkey approval. Raw-ed25519
+// approvers sign out of band with the `approve` CLI instead of a web link. The core
+// protocol does not depend on this adapter.
 
 import { CountersignError } from "../core/errors.js";
 import { deadline } from "../core/defaults.js";

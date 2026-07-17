@@ -9,21 +9,24 @@
 // is POSTed back. The server never holds the approver's key — it only relays and
 // verifies (via PendingDecisions.record), so it cannot forge a keyed approval.
 //
-// @experimental — the browser-passkey signing UX is still stabilizing. Its security
-// (approver-signed receipts the server can't forge) matches every keyed path, but this
-// HTTP delivery/collection surface is not yet frozen. Stable keyed signing today is the
-// raw-ed25519 `approve` CLI; vouched approvals use the chat/email adapters.
+// Stable: the HTTP surface (GET/POST /sign, the signing-link token format, and the
+// two-phase challenge→record protocol) is frozen. The passkey receipts it collects —
+// including the assertion-challenge recipe (unsignedReceipt/challengeFor in
+// core/countersignature.ts) — are covered by the conformance vectors (vectors/
+// `webauthn` section); the HTTP/token surface itself is exercised by the test suite
+// and the browser human-simulation harness (scripts/sim-server.ts, scripts/sim-e2e.ts).
+// Raw-ed25519 keyed approvers still sign out of band with the `approve` CLI; vouched
+// approvals use the chat/email adapters.
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { escapeHtml, pruneExpired, verifyBearerToken, PendingDecisions, readBody } from "./adapter.js";
-import { canonicalize } from "./core/canonical.js";
-import { fromB64url, publicKeyFromSecret, signContext, toB64url, utf8, verifyContext } from "./core/keys.js";
-import { normalizeActor } from "./core/countersignature.js";
+import { publicKeyFromSecret, signContext, toB64url, utf8 } from "./core/keys.js";
+import { challengeFor, normalizeActor, unsignedReceipt } from "./core/countersignature.js";
 import { deadline } from "./core/defaults.js";
 import { quorumOf } from "./core/intent.js";
 import { isWebAuthnCredential, type WebAuthnPolicy } from "./core/webauthn.js";
-import { COUNTERSIGN_VERSION, COUNTERSIGNATURE_CONTEXT, LINK_CONTEXT, type Approver, type Countersignature, type Intent } from "./core/types.js";
+import { LINK_CONTEXT, type Approver, type Countersignature, type Intent } from "./core/types.js";
 
 export interface SigningServerConfig {
   /** The shared decision store the adapter awaits on (record() resolves it). */
@@ -58,14 +61,6 @@ export function verifySigningToken(token: string, authorityPublicKey: string): S
   if (!p || p.typ !== "sign" || typeof p.intent_id !== "string" || typeof p.actor !== "string" || typeof p.exp !== "number" || !Number.isFinite(p.exp))
     return null;
   return p;
-}
-
-/** The unsigned receipt fields the assertion challenge is computed over. */
-function unsignedReceipt(intentId: string, decision: "approve" | "reject", actor: string, credential: string, timestamp: string) {
-  return { countersign: COUNTERSIGN_VERSION, intent_id: intentId, decision, actor, policy: "approver" as const, timestamp, public_key: credential };
-}
-function challengeFor(unsigned: object): string {
-  return toB64url(createHash("sha256").update(utf8(`${COUNTERSIGNATURE_CONTEXT}\n${canonicalize(unsigned)}`)).digest());
 }
 
 /**

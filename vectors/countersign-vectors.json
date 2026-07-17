@@ -615,6 +615,617 @@
       }
     }
   ],
+  "webauthn": {
+    "note": "Passkey receipts: `signature` is the authenticator assertion over authenticatorData || SHA256(clientDataJSON); the clientData challenge is base64url(sha256(utf8(`${countersignature context}\\n${canonical unsigned receipt}`))) where the unsigned receipt omits `signature` and `webauthn`. EVERY case carries the `policy` to verify under; `policy: null` means verify WITHOUT an RP policy (must fail closed). ed25519 cases are fully deterministic (RFC 8032); the P-256 case is frozen (ECDSA signing is randomized) — verifying it is still deterministic.",
+    "receipts": [
+      {
+        "name": "ed25519-approve-ceo",
+        "valid": true,
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "decision": "approve",
+          "actor": "m:ceo",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+          "signature": "pezXhn80o_5-TOXXAYOyZfFwswLGA4dyyGDKeNCTMvKFyqfr39jpzpqIo4M5JKvVIWNmUZLfHGrGEIX6yFllBg",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+          }
+        }
+      },
+      {
+        "name": "ed25519-approve-cto",
+        "valid": true,
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "decision": "approve",
+          "actor": "m:cto",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-ed25519:oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+          "signature": "gLBnI9Q94KcEwCFGypJtQ1J9ArcUZ0Y9zxODYllUqIVYRwj9xx1MAfpbnbbgwLXAOAFWjkVU-fTQmovL7csFCw",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiM1NaVDJ3aU54VW9KVWxTZ0Q4TVhPaE9aLTd4dlNRZDBGX0Rydm5vaWp3VSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+          }
+        }
+      },
+      {
+        "name": "ed25519-up-only-ok-when-uv-not-required",
+        "valid": true,
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "note": "User Present alone satisfies a policy that does not require User Verification",
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "decision": "approve",
+          "actor": "m:ceo",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+          "signature": "NCIiJFPdWg0Q5w6etr1MKWv9aYQAZ-M1pxk-gIlzfElPb0XedHk78AANfoKg9prrlvYum_SFuuC9j3qCYqgZCw",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkBAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+          }
+        }
+      },
+      {
+        "name": "p256-approve-frozen",
+        "valid": true,
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "note": "frozen assertion (see section note)",
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "55555555-5555-4555-8555-555555555555",
+          "decision": "approve",
+          "actor": "m:cfo",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-p256:BIN3wUkbiIsb8C-eCs6HAKHL3pwNnfuIFQKZlsm78_fJG2t0xkRIiMe9y_U5MA1Q1MwKzfKwA1S24Aqgfi0MHQ8",
+          "signature": "MEYCIQCJLLQQBa9h5pUhNyffQDn1y9REyQXRLvwYGz90j_sXGQIhALSKLTF9ZD8VYl92uVEE_SJDD4V1A0TpqRlt9gLQ2suT",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiQU1ral9vZ0NYc0FiemdfalJWbFZKeDJEdGdwcXE1YjMyaDBDUUY3bTFQTSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+          }
+        }
+      },
+      {
+        "name": "no-rp-policy-fails-closed",
+        "valid": false,
+        "policy": null,
+        "note": "the SAME receipt as ed25519-approve-ceo; a passkey receipt without an RP policy must not verify",
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "decision": "approve",
+          "actor": "m:ceo",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+          "signature": "pezXhn80o_5-TOXXAYOyZfFwswLGA4dyyGDKeNCTMvKFyqfr39jpzpqIo4M5JKvVIWNmUZLfHGrGEIX6yFllBg",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+          }
+        }
+      },
+      {
+        "name": "wrong-origin-phishing",
+        "valid": false,
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "note": "assertion produced at an origin outside allowedOrigins",
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "decision": "approve",
+          "actor": "m:ceo",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+          "signature": "sfc_lOYkayMaRkXrbgWnw7yLaQjokObySHIMXfCHR4RKSfl3NSORh17HQ6y_3drK8pbE8BB5ic9lQAHXi1txBA",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vZXZpbC5leGFtcGxlLmNvbSJ9"
+          }
+        }
+      },
+      {
+        "name": "cross-origin-iframe",
+        "valid": false,
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "note": "clientData.crossOrigin === true (ceremony ran inside a cross-origin frame)",
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "decision": "approve",
+          "actor": "m:ceo",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+          "signature": "4n5mE4BKZq5PxhfLMObe7kSUZsVDlD5AkxTpAARp369PkFUCJAzIaAHzWIlK0vYl8g0Z1ldwlbEPSvoMqp7SBQ",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSIsImNyb3NzT3JpZ2luIjp0cnVlfQ"
+          }
+        }
+      },
+      {
+        "name": "user-present-flag-missing",
+        "valid": false,
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "note": "UP flag (0x01) unset — User Present is always required",
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "decision": "approve",
+          "actor": "m:ceo",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+          "signature": "s-6Z5AA7sYXVSxng6TaXlEOTzEOnaUSNyWic0T7xWNAPoFYeDDKeCaL7I-9S98EUg-3LvXZnHOpzbhfU2qJLAQ",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkEAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+          }
+        }
+      },
+      {
+        "name": "uv-required-but-not-verified",
+        "valid": false,
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ],
+          "requireUserVerification": true
+        },
+        "note": "UP-only assertion rejected when the policy requires User Verification",
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "decision": "approve",
+          "actor": "m:ceo",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+          "signature": "NCIiJFPdWg0Q5w6etr1MKWv9aYQAZ-M1pxk-gIlzfElPb0XedHk78AANfoKg9prrlvYum_SFuuC9j3qCYqgZCw",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkBAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+          }
+        }
+      },
+      {
+        "name": "forged-wrong-authenticator-key",
+        "valid": false,
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "note": "claims m:ceo's bound credential but signed by a different authenticator key",
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "decision": "approve",
+          "actor": "m:ceo",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+          "signature": "WRAXenX-HPpL8IXD-5CFiKnDu46JYMUDSGhHopO019sg39NHzxF7tS4wyWx-YwewfIy75Vur1Ty9olPvP8WHDg",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+          }
+        }
+      },
+      {
+        "name": "replayed-onto-different-intent",
+        "valid": false,
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "note": "the challenge binds the receipt to its intent_id — a replay onto another intent must fail",
+        "receipt": {
+          "countersign": "0.2",
+          "intent_id": "22222222-2222-4222-8222-222222222222",
+          "decision": "approve",
+          "actor": "m:ceo",
+          "policy": "approver",
+          "timestamp": "2026-01-01T00:01:00.000Z",
+          "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+          "signature": "pezXhn80o_5-TOXXAYOyZfFwswLGA4dyyGDKeNCTMvKFyqfr39jpzpqIo4M5JKvVIWNmUZLfHGrGEIX6yFllBg",
+          "webauthn": {
+            "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+            "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+          }
+        }
+      }
+    ],
+    "resolutions": [
+      {
+        "name": "passkey-2of2-approve",
+        "expect": "valid",
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "expected_authority_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "intent": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "agent": {
+            "id": "agent:vectors",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+          },
+          "action": "prod.deploy",
+          "summary": "Deploy 2.5.0 to production",
+          "risk_tier": "critical",
+          "approvers": [
+            {
+              "actor": "m:ceo",
+              "mode": "keyed",
+              "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs"
+            },
+            {
+              "actor": "m:cto",
+              "mode": "keyed",
+              "public_key": "webauthn-ed25519:oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+            }
+          ],
+          "quorum": 2,
+          "timeout": 300,
+          "default": "reject",
+          "callback": null,
+          "created_at": "2026-01-01T00:00:00.000Z",
+          "signature": "JDV4hKXfprLcH4kpLSbxnTgvj2rjfOYgGu2TRrpYVAfe6AV_-noJt2U_NN63v8g1UC1s5BiefAfXkVS8oGJmAw"
+        },
+        "resolution": {
+          "decision": "approve",
+          "policy": "approver",
+          "countersignatures": [
+            {
+              "countersign": "0.2",
+              "intent_id": "33333333-3333-4333-8333-333333333333",
+              "decision": "approve",
+              "actor": "m:ceo",
+              "policy": "approver",
+              "timestamp": "2026-01-01T00:01:00.000Z",
+              "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+              "signature": "pezXhn80o_5-TOXXAYOyZfFwswLGA4dyyGDKeNCTMvKFyqfr39jpzpqIo4M5JKvVIWNmUZLfHGrGEIX6yFllBg",
+              "webauthn": {
+                "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+                "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+              }
+            },
+            {
+              "countersign": "0.2",
+              "intent_id": "33333333-3333-4333-8333-333333333333",
+              "decision": "approve",
+              "actor": "m:cto",
+              "policy": "approver",
+              "timestamp": "2026-01-01T00:01:00.000Z",
+              "public_key": "webauthn-ed25519:oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+              "signature": "gLBnI9Q94KcEwCFGypJtQ1J9ArcUZ0Y9zxODYllUqIVYRwj9xx1MAfpbnbbgwLXAOAFWjkVU-fTQmovL7csFCw",
+              "webauthn": {
+                "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+                "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiM1NaVDJ3aU54VW9KVWxTZ0Q4TVhPaE9aLTd4dlNRZDBGX0Rydm5vaWp3VSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "p256-single-approve-frozen",
+        "expect": "valid",
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "expected_authority_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "intent": {
+          "countersign": "0.2",
+          "intent_id": "55555555-5555-4555-8555-555555555555",
+          "agent": {
+            "id": "agent:vectors",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+          },
+          "action": "treasury.wire",
+          "summary": "Wire $250,000 to escrow",
+          "risk_tier": "critical",
+          "approvers": [
+            {
+              "actor": "m:cfo",
+              "mode": "keyed",
+              "public_key": "webauthn-p256:BIN3wUkbiIsb8C-eCs6HAKHL3pwNnfuIFQKZlsm78_fJG2t0xkRIiMe9y_U5MA1Q1MwKzfKwA1S24Aqgfi0MHQ8"
+            }
+          ],
+          "quorum": 1,
+          "timeout": 300,
+          "default": "reject",
+          "callback": null,
+          "created_at": "2026-01-01T00:00:00.000Z",
+          "signature": "uVH-EmTW7gukOkMb3Wy_i02ShtOvqLKXDkCYNNeNbOfqpOVlHUoKz37gOmHiKzK62TVp33U2vvW7LiJm91JyAQ"
+        },
+        "resolution": {
+          "decision": "approve",
+          "policy": "approver",
+          "countersignatures": [
+            {
+              "countersign": "0.2",
+              "intent_id": "55555555-5555-4555-8555-555555555555",
+              "decision": "approve",
+              "actor": "m:cfo",
+              "policy": "approver",
+              "timestamp": "2026-01-01T00:01:00.000Z",
+              "public_key": "webauthn-p256:BIN3wUkbiIsb8C-eCs6HAKHL3pwNnfuIFQKZlsm78_fJG2t0xkRIiMe9y_U5MA1Q1MwKzfKwA1S24Aqgfi0MHQ8",
+              "signature": "MEYCIQCJLLQQBa9h5pUhNyffQDn1y9REyQXRLvwYGz90j_sXGQIhALSKLTF9ZD8VYl92uVEE_SJDD4V1A0TpqRlt9gLQ2suT",
+              "webauthn": {
+                "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+                "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiQU1ral9vZ0NYc0FiemdfalJWbFZKeDJEdGdwcXE1YjMyaDBDUUY3bTFQTSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "passkey-no-rp-policy-fails-closed",
+        "expect": "invalid",
+        "policy": null,
+        "note": "the same 2-of-2 approval must NOT verify without an RP policy",
+        "expected_authority_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "intent": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "agent": {
+            "id": "agent:vectors",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+          },
+          "action": "prod.deploy",
+          "summary": "Deploy 2.5.0 to production",
+          "risk_tier": "critical",
+          "approvers": [
+            {
+              "actor": "m:ceo",
+              "mode": "keyed",
+              "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs"
+            },
+            {
+              "actor": "m:cto",
+              "mode": "keyed",
+              "public_key": "webauthn-ed25519:oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+            }
+          ],
+          "quorum": 2,
+          "timeout": 300,
+          "default": "reject",
+          "callback": null,
+          "created_at": "2026-01-01T00:00:00.000Z",
+          "signature": "JDV4hKXfprLcH4kpLSbxnTgvj2rjfOYgGu2TRrpYVAfe6AV_-noJt2U_NN63v8g1UC1s5BiefAfXkVS8oGJmAw"
+        },
+        "resolution": {
+          "decision": "approve",
+          "policy": "approver",
+          "countersignatures": [
+            {
+              "countersign": "0.2",
+              "intent_id": "33333333-3333-4333-8333-333333333333",
+              "decision": "approve",
+              "actor": "m:ceo",
+              "policy": "approver",
+              "timestamp": "2026-01-01T00:01:00.000Z",
+              "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+              "signature": "pezXhn80o_5-TOXXAYOyZfFwswLGA4dyyGDKeNCTMvKFyqfr39jpzpqIo4M5JKvVIWNmUZLfHGrGEIX6yFllBg",
+              "webauthn": {
+                "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+                "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+              }
+            },
+            {
+              "countersign": "0.2",
+              "intent_id": "33333333-3333-4333-8333-333333333333",
+              "decision": "approve",
+              "actor": "m:cto",
+              "policy": "approver",
+              "timestamp": "2026-01-01T00:01:00.000Z",
+              "public_key": "webauthn-ed25519:oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+              "signature": "gLBnI9Q94KcEwCFGypJtQ1J9ArcUZ0Y9zxODYllUqIVYRwj9xx1MAfpbnbbgwLXAOAFWjkVU-fTQmovL7csFCw",
+              "webauthn": {
+                "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+                "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiM1NaVDJ3aU54VW9KVWxTZ0Q4TVhPaE9aLTd4dlNRZDBGX0Rydm5vaWp3VSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "passkey-forged-slot",
+        "expect": "invalid",
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "note": "m:ceo's slot filled by an assertion from the wrong authenticator key",
+        "expected_authority_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "intent": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "agent": {
+            "id": "agent:vectors",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+          },
+          "action": "prod.deploy",
+          "summary": "Deploy 2.5.0 to production",
+          "risk_tier": "critical",
+          "approvers": [
+            {
+              "actor": "m:ceo",
+              "mode": "keyed",
+              "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs"
+            },
+            {
+              "actor": "m:cto",
+              "mode": "keyed",
+              "public_key": "webauthn-ed25519:oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+            }
+          ],
+          "quorum": 2,
+          "timeout": 300,
+          "default": "reject",
+          "callback": null,
+          "created_at": "2026-01-01T00:00:00.000Z",
+          "signature": "JDV4hKXfprLcH4kpLSbxnTgvj2rjfOYgGu2TRrpYVAfe6AV_-noJt2U_NN63v8g1UC1s5BiefAfXkVS8oGJmAw"
+        },
+        "resolution": {
+          "decision": "approve",
+          "policy": "approver",
+          "countersignatures": [
+            {
+              "countersign": "0.2",
+              "intent_id": "33333333-3333-4333-8333-333333333333",
+              "decision": "approve",
+              "actor": "m:ceo",
+              "policy": "approver",
+              "timestamp": "2026-01-01T00:01:00.000Z",
+              "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+              "signature": "WRAXenX-HPpL8IXD-5CFiKnDu46JYMUDSGhHopO019sg39NHzxF7tS4wyWx-YwewfIy75Vur1Ty9olPvP8WHDg",
+              "webauthn": {
+                "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+                "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+              }
+            },
+            {
+              "countersign": "0.2",
+              "intent_id": "33333333-3333-4333-8333-333333333333",
+              "decision": "approve",
+              "actor": "m:cto",
+              "policy": "approver",
+              "timestamp": "2026-01-01T00:01:00.000Z",
+              "public_key": "webauthn-ed25519:oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
+              "signature": "gLBnI9Q94KcEwCFGypJtQ1J9ArcUZ0Y9zxODYllUqIVYRwj9xx1MAfpbnbbgwLXAOAFWjkVU-fTQmovL7csFCw",
+              "webauthn": {
+                "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+                "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiM1NaVDJ3aU54VW9KVWxTZ0Q4TVhPaE9aLTd4dlNRZDBGX0Rydm5vaWp3VSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "passkey-under-quorum",
+        "expect": "invalid",
+        "policy": {
+          "rpId": "approve.example.com",
+          "allowedOrigins": [
+            "https://approve.example.com"
+          ]
+        },
+        "note": "only 1 of 2 required passkey approvals",
+        "expected_authority_public_key": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+        "intent": {
+          "countersign": "0.2",
+          "intent_id": "33333333-3333-4333-8333-333333333333",
+          "agent": {
+            "id": "agent:vectors",
+            "public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w"
+          },
+          "action": "prod.deploy",
+          "summary": "Deploy 2.5.0 to production",
+          "risk_tier": "critical",
+          "approvers": [
+            {
+              "actor": "m:ceo",
+              "mode": "keyed",
+              "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs"
+            },
+            {
+              "actor": "m:cto",
+              "mode": "keyed",
+              "public_key": "webauthn-ed25519:oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+            }
+          ],
+          "quorum": 2,
+          "timeout": 300,
+          "default": "reject",
+          "callback": null,
+          "created_at": "2026-01-01T00:00:00.000Z",
+          "signature": "JDV4hKXfprLcH4kpLSbxnTgvj2rjfOYgGu2TRrpYVAfe6AV_-noJt2U_NN63v8g1UC1s5BiefAfXkVS8oGJmAw"
+        },
+        "resolution": {
+          "decision": "approve",
+          "policy": "approver",
+          "countersignatures": [
+            {
+              "countersign": "0.2",
+              "intent_id": "33333333-3333-4333-8333-333333333333",
+              "decision": "approve",
+              "actor": "m:ceo",
+              "policy": "approver",
+              "timestamp": "2026-01-01T00:01:00.000Z",
+              "public_key": "webauthn-ed25519:iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
+              "signature": "pezXhn80o_5-TOXXAYOyZfFwswLGA4dyyGDKeNCTMvKFyqfr39jpzpqIo4M5JKvVIWNmUZLfHGrGEIX6yFllBg",
+              "webauthn": {
+                "authenticator_data": "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+                "client_data_json": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiZm1XMTlzTkkzM2hjYXdaVEVsOGF1SVVCeHcwcVNwWDEyUWN1c2pPaGxvSSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
   "chain": {
     "note": "append these receipts in order to a fresh hash-chained ReceiptLog; head() must equal expected_head",
     "receipts": [

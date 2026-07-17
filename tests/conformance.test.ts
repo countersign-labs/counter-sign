@@ -7,17 +7,19 @@
 // test + a reviewable vector diff, instead of a silent wire-format drift. Any independent implementation
 // (in any language) can consume the same vectors — see vectors/README.md.
 
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { canonicalize } from "../src/core/canonical.js";
-import { publicKeyFromSecret, signContext, verifyContext, toB64url, utf8 } from "../src/core/keys.js";
+import { fromB64url, publicKeyFromSecret, signContext, verifyContext, toB64url, utf8 } from "../src/core/keys.js";
 import { verifyIntent } from "../src/core/intent.js";
 import { verifyCountersignature } from "../src/core/countersignature.js";
 import { verifyResolution } from "../src/core/defaults.js";
 import { ReceiptLog } from "../src/receipt-log.js";
-import type { Intent, Resolution } from "../src/core/types.js";
+import type { WebAuthnPolicy } from "../src/core/webauthn.js";
+import type { Countersignature, Intent, Resolution } from "../src/core/types.js";
 
 const V = JSON.parse(readFileSync(join(__dirname, "..", "vectors", "countersign-vectors.json"), "utf8"));
 
@@ -77,6 +79,41 @@ describe("conformance vectors", () => {
     for (const r of V.resolutions) {
       it(`${r.name} → ${r.expect}`, () => {
         const run = () => verifyResolution(r.intent as Intent, r.resolution as Resolution, r.expected_authority_public_key);
+        if (r.expect === "valid") expect(run).not.toThrow();
+        else expect(run).toThrow();
+      });
+    }
+  });
+
+  describe("WebAuthn passkey receipts", () => {
+    it("ships a webauthn vector section — receipts + resolutions, each carrying its RP policy", () => {
+      expect(V.webauthn).toBeDefined();
+      expect(V.webauthn.receipts.length).toBeGreaterThan(0);
+      expect(V.webauthn.resolutions.length).toBeGreaterThan(0);
+      // Every case declares the policy to verify under (an object, or null = no policy).
+      for (const c of [...V.webauthn.receipts, ...V.webauthn.resolutions]) expect(c.policy !== undefined).toBe(true);
+    });
+
+    it("recomputes the assertion challenge from the canonical unsigned receipt (known answer)", () => {
+      const c = V.webauthn.receipts.find((r: { name: string }) => r.name === "ed25519-approve-ceo");
+      const { signature: _s, webauthn: _w, ...unsigned } = c.receipt;
+      const challenge = toB64url(
+        createHash("sha256").update(utf8(`${V.algorithm.contexts.countersignature}\n${canonicalize(unsigned)}`)).digest(),
+      );
+      const clientData = JSON.parse(fromB64url(c.receipt.webauthn.client_data_json).toString("utf8"));
+      expect(clientData.challenge).toBe(challenge);
+    });
+
+    for (const c of V.webauthn.receipts as { name: string; valid: boolean; policy: WebAuthnPolicy | null; receipt: Countersignature }[]) {
+      it(`${c.name} → verifyCountersignature === ${c.valid}`, () => {
+        // `policy: null` encodes the fail-closed case: a passkey receipt without an RP policy must not verify.
+        expect(verifyCountersignature(c.receipt, { trustedKeys: [c.receipt.public_key], webauthn: c.policy ?? undefined })).toBe(c.valid);
+      });
+    }
+
+    for (const r of V.webauthn.resolutions as { name: string; expect: string; policy: WebAuthnPolicy | null; expected_authority_public_key: string; intent: Intent; resolution: Resolution }[]) {
+      it(`${r.name} → ${r.expect}`, () => {
+        const run = () => verifyResolution(r.intent, r.resolution, r.expected_authority_public_key, r.policy ?? undefined);
         if (r.expect === "valid") expect(run).not.toThrow();
         else expect(run).toThrow();
       });

@@ -24,5 +24,6 @@ describe("policy entry signing", () => {
     const e: PolicyEntry = { ...unsigned(), signature: "sig" };
     expect(hashEntry(e)).toBe(hashEntry({ ...e }));
     expect(hashEntry(e)).not.toBe(hashEntry({ ...e, seq: 1 }));
+    expect(hashEntry(e)).not.toBe(hashEntry({ ...e, signature: "other-sig" }));
   });
 });

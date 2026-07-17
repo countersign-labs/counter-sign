@@ -7,29 +7,66 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 
 ## [Unreleased]
 
-### Added
-- **Conformance test vectors** ([`vectors/`](vectors/)) — a deterministic,
-  language-neutral fixture set any independent implementation can check itself
-  against, so signature interop is *provable* rather than assumed. Covers fixed
-  test keys, canonical-JSON known-answers (where implementations most often
-  diverge), low-level `signContext` message + signature vectors, signed Intents,
-  keyed/vouched/timeout-default receipts, `verifyResolution` accept **and** reject
-  cases (under-quorum, forged-quorum, wrong-authority-key), and the receipt-log
-  hash-chain head. Shipped in the npm package (`files`).
-- **Conformance suite** ([`tests/conformance.test.ts`](tests/conformance.test.ts))
-  — re-verifies the reference implementation against the *committed* vectors on
-  every `npm test`, so a canonicalization or signing change that would break
-  cross-implementation interop surfaces as a failing test plus a reviewable vector
-  diff, instead of a silent wire-format drift.
-- **`npm run gen:vectors`** ([`scripts/gen-vectors.ts`](scripts/gen-vectors.ts))
-  regenerates the vectors byte-identically (ed25519 is deterministic; all ids and
-  timestamps fixed), and [`vectors/README.md`](vectors/README.md) documents the
-  signing algorithm (key encoding, canonical JSON, signed bytes, contexts, chain)
-  and how to write a runner in another language.
+## [0.2.0] — 2026-07-17
 
-### Notes
-- No wire-format change; existing receipts still verify. Passkey/WebAuthn receipts
-  (non-deterministic P-256) are not yet vectored — planned.
+Per-approver-key quorum: `quorum > 1` is now **cryptographic separation of duty**, not a
+count the single authority vouches for. This is the first wire-format change since 0.1
+(`countersign: "0.2"`).
+
+### Added
+- **Per-approver-key quorum (`keyed` approvers).** For `quorum > 1`, every approver signs
+  their own receipt with their own key, which the authority never holds — so a party in
+  possession of the authority key can neither forge the quorum nor swap an approver's
+  bound key (each key is bound in the agent-signed Intent). Four-eyes becomes cryptographic
+  separation of duty. Vouched approvers remain available for a single approver; mixing a
+  vouched slot into `quorum > 1` is rejected.
+- **Enrollment registry (`ApproverRegistry`).** An org-root-attested, hash-chained,
+  append-only log anchoring each `actor → key` binding — signed by an org-root key distinct
+  from the runtime authority, with proof-of-possession required for every key (a
+  raw-ed25519 self-signature, or a WebAuthn assertion for a passkey), plus revocation and a
+  strict `assertApproversEnrolled` check. New `enroll` CLI.
+- **Human passkey / WebAuthn signing** (`@experimental`). `SigningServer` (a deep-linked
+  signing page + single-use link + receipt collection) and `SigningLinkAdapter` (delivers a
+  keyed passkey quorum through the `wrapAction` path). Security matches every keyed path —
+  the server holds no approver key — but the async delivery/collection glue is not yet
+  frozen; for production keyed approvals today, use the raw-ed25519 `approve` CLI or vouched
+  chat/email approvers.
+- **`approve` CLI** — a raw-ed25519 keyed approver signs a receipt out of band (the stable
+  keyed path).
+- **Conformance test vectors + suite** ([`vectors/`](vectors/)) — a deterministic,
+  language-neutral fixture set any independent implementation can check itself against, so
+  signature interop is *provable*, not assumed: canonical-JSON known-answers, key
+  derivation, `signContext` message + signature vectors, signed Intents,
+  keyed/vouched/timeout-default receipts, `verifyResolution` accept **and** reject cases
+  (under-quorum, forged-quorum, wrong-authority-key), and the receipt-log hash-chain head.
+  Regenerate with `npm run gen:vectors`; the reference impl is re-checked against the
+  committed vectors on every `npm test` ([`tests/conformance.test.ts`](tests/conformance.test.ts)).
+  See [`vectors/README.md`](vectors/README.md). Shipped in the npm package. Passkey/WebAuthn
+  receipts (non-deterministic P-256) are not yet vectored — planned.
+
+### Changed
+- **Wire version → `0.2`** (the `countersign` field and every signature context). A
+  **deliberate compatibility break**: v0.1 integrity-only receipts predate per-approver keys
+  and were forgeable by a compromised authority server, so a v0.2 verifier does not accept
+  them — they fault loudly, never silently. Audit existing v0.1 archives with a v0.1 install.
+- **`verifyAll` audit model.** Keyed, vouched, and timeout-Default receipts all require
+  `authorityKey` to be audited (mirroring `verifyResolution`); `trustedKeys` /
+  `trustedAgentKeys` are additional filters, compared by credential material so a passkey
+  descriptor and its raw form are one identity. Malformed / empty option inputs are rejected
+  with clear errors rather than silently misreporting an honest log.
+- **`wrapAction` reconciles the authority key** (as well as the WebAuthn policy) with the
+  adapter and fails fast before delivery, so a human is never told "approved" on a request
+  the runtime would then silently block.
+
+### Security
+- The keyed-quorum path went through repeated adversarial review rounds (a convergence loop)
+  plus a browser + WebAuthn human-simulation harness exercising approve / veto /
+  timeout-Default / wrong-key end to end. 328 tests.
+
+### Fixed
+- Many fail-closed and audit-consistency fixes across `verifyAll`, the shim, the adapters,
+  and the enrollment / receipt-log CLIs, surfaced during review (see the
+  `fix(v0.2): resolve round-N findings` history).
 
 ## [0.1.3] — 2026-07-15
 
@@ -142,7 +179,8 @@ First public draft of the protocol and reference implementation.
 - Code: Apache-2.0. Specification text: CC BY 4.0 (vendored as
   `LICENSE-CC-BY-4.0.txt`).
 
-[Unreleased]: https://github.com/countersign-labs/counter-sign/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/countersign-labs/counter-sign/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/countersign-labs/counter-sign/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/countersign-labs/counter-sign/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/countersign-labs/counter-sign/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/countersign-labs/counter-sign/compare/v0.1.0...v0.1.1

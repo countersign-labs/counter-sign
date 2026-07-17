@@ -82,6 +82,12 @@ export class SigningLinkAdapter implements Adapter {
     // a fresh wait and send links, and a default:"approve" request could execute after
     // the process was told to stop.
     if (this.closed) throw new CountersignError("signing-link adapter is closed");
+    // Finality (spec §4) is enforced in PendingDecisions: once an intent RESOLVES, a
+    // re-wait returns the recorded decision, not a fresh reopenable entry — so a second
+    // deliver() of a resolved intent cannot be reopened by an un-consumed approver's
+    // link. That guarantee lives at the shared layer (protecting every caller), which
+    // also means re-delivering a STILL-PENDING intent (e.g. retrying after a swallowed
+    // partial notify failure) safely re-notifies over the SAME idempotent wait here.
     // This adapter serves KEYED (passkey) approvers who sign their OWN receipt via
     // the SigningServer — the inverse of the vouched-only chat/email adapters. A
     // vouched approver has no key to sign a link with; refuse rather than silently

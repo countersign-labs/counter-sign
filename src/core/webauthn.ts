@@ -87,6 +87,14 @@ export function isValidCredentialDescriptor(s: unknown): s is string {
   }
   if (bytes.length !== len || toB64url(bytes) !== keyPart) return false;
   if (prefix === P256_PREFIX && bytes[0] !== 0x04) return false; // uncompressed point marker
+  // NB: a well-formed-but-OFF-CURVE point is intentionally NOT rejected here. This
+  // predicate is a STRUCTURAL check used by intent construction and audit replay
+  // (assertIntentInvariants, receipt-log verification), so tightening it would
+  // retroactively invalidate previously-verifiable historical records that carry
+  // such a key. It is not security-load-bearing: an off-curve point can never
+  // produce a passing assertion — verifyWebAuthnAssertion's createPublicKey rejects
+  // it at signature-check time (throws → caught → false) — so a bad point simply
+  // cannot approve, it cannot forge.
   return true;
 }
 
@@ -132,6 +140,11 @@ export function verifyWebAuthnAssertion(
     }
     if (clientData.type !== "webauthn.get") return false;
     if (typeof clientData.challenge !== "string" || !eqB64url(clientData.challenge, opts.expectedChallenge)) return false;
+    // `allowedOrigins` MUST be an array of exact origins. A JS caller (no compiler)
+    // that passes a bare string would get String.prototype.includes — SUBSTRING
+    // matching — so "https://app.example.com" would accept "app.example.co" as a
+    // substring. Guard the shape so a malformed policy fails closed, not open.
+    if (!Array.isArray(opts.allowedOrigins)) return false;
     if (typeof clientData.origin !== "string" || !opts.allowedOrigins.includes(clientData.origin)) return false;
     // Reject an assertion produced inside a cross-origin frame (defense in depth
     // alongside the signing page's frame-ancestors 'none'): `crossOrigin` is
@@ -146,6 +159,11 @@ export function verifyWebAuthnAssertion(
     const flags = authData[32];
     if ((flags & 0x01) === 0) return false; // User Present (UP) — mandatory
     if (opts.requireUserVerification && (flags & 0x04) === 0) return false; // User Verified (UV)
+    // Backup State (BS, 0x10) MUST NOT be set when Backup Eligibility (BE, 0x08) is
+    // clear — a non-backup-eligible credential cannot be backed up. Rejecting the
+    // impossible BS&&!BE combination is required by the WebAuthn assertion algorithm
+    // (§ Verifying an authentication assertion) and rejects malformed authenticators.
+    if ((flags & 0x10) !== 0 && (flags & 0x08) === 0) return false;
 
     // --- signature over authenticatorData || SHA256(clientDataJSON) ---
     const clientDataHash = createHash("sha256").update(clientDataBytes).digest();

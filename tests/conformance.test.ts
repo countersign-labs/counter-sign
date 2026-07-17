@@ -34,6 +34,18 @@ describe("conformance vectors", () => {
         expect(canonicalize(c.value)).toBe(c.canonical);
       });
     }
+
+    // The `undefined-omitted` vector cannot round-trip through JSON — JSON.stringify
+    // drops a `b: undefined` member, so the committed vector's `value` is `{a,c}` and
+    // the loop above never actually exercises omission of a PRESENT undefined member
+    // (a JS-only concept no cross-language vector can carry). Assert that behavior here
+    // in memory against the shipped known-answer, so the claim "undefined members
+    // omitted" is genuinely tested.
+    it("omits a present-but-undefined member (JS-only, against the shipped known-answer)", () => {
+      const known = V.canonical.find((c: { name: string }) => c.name === "undefined-omitted");
+      expect(canonicalize({ a: 1, b: undefined, c: 3 })).toBe(known.canonical);
+      expect(known.canonical).toBe('{"a":1,"c":3}');
+    });
   });
 
   describe("key derivation", () => {

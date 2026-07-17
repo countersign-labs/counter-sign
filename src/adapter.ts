@@ -98,8 +98,29 @@ export function assertVouchedApprovers(intent: Intent): void {
 /** Book-keeping shared by all adapters: intents awaiting human decisions. */
 export class PendingDecisions {
   private entries = new Map<string, PendingEntry>();
+  /**
+   * Terminal outcomes (spec §4 finality). Once an intent RESOLVES, its live entry is
+   * deleted but a tombstone is kept here until its deadline. A later wait() for that
+   * intent_id returns the recorded resolution instead of minting a FRESH entry — which
+   * would let an un-consumed approver record a contradictory SECOND resolution for an
+   * already-decided intent. Enforced at this layer so it protects EVERY caller (any
+   * adapter instance, a raw awaitResolution), not just one. Only real resolutions are
+   * tombstoned — a cancel/abort is not terminal, so a failed delivery can still retry.
+   */
+  private resolved = new Map<string, { resolution: Resolution; deadline: number }>();
 
   wait(intent: Intent): Promise<Resolution> {
+    // Finality: a resolved intent yields its recorded decision, never a reopenable wait.
+    // Gated on the WALL CLOCK (Date.now() vs the recorded deadline) — the SAME authority
+    // record()/settle() use — not a timer. That makes finality immune to Node's ~24.8-day
+    // setTimeout ceiling AND to backward wall-clock steps: a timer-based reaper could clamp
+    // or fire early and reopen an already-decided intent; a wall-clock gate cannot. Past the
+    // deadline the tombstone is inert (record()/settle() reject anyway), so drop it lazily.
+    const done = this.resolved.get(intent.intent_id);
+    if (done) {
+      if (Date.now() < done.deadline) return Promise.resolve(done.resolution);
+      this.resolved.delete(intent.intent_id);
+    }
     // Idempotent: exactly one pending decision per intent_id. A second wait() for the
     // same intent returns the SAME promise instead of overwriting the entry — an
     // overwrite would strand the first promise (its resolve/reject would be orphaned,
@@ -150,6 +171,9 @@ export class PendingDecisions {
         // signed Default. Leave the promise pending; it is GC'd once the race
         // settles to the Default. A late decision after eviction is ignored by
         // settle() (unknown intent_id → null), matching "the Default already decided".
+        // A far-future (> ~24.8-day) delay clamps to ~1 ms and evicts early — harmless
+        // here (a later decision finds no entry → ignored; awaitWithDefault rejects the
+        // far-future intent up front), and it self-cleans rather than leaking the entry.
         if (this.entries.get(intent.intent_id) === entry) this.entries.delete(intent.intent_id);
       }, Math.max(0, remaining));
       entry.timer.unref?.();
@@ -255,10 +279,20 @@ export class PendingDecisions {
     return { countersignature: receipt, status: "pending", collected: entry.approvals.size, quorum: entry.quorum };
   }
 
-  /** Resolve a pending entry: cancel its reaper, drop it from the map, settle the promise. */
+  /** Resolve a pending entry: cancel its reaper, drop it from the map, settle the promise,
+   *  and leave a finality tombstone until the deadline so the intent cannot be reopened. */
   private finish(intentId: string, entry: PendingEntry, resolution: Resolution): void {
     clearTimeout(entry.timer);
     this.entries.delete(intentId);
+    // Tombstone the terminal outcome, gated on the wall clock (see wait()): a re-wait
+    // before the deadline returns THIS resolution instead of a fresh reopenable entry;
+    // at/after the deadline the tombstone is inert and dropped lazily. No timer — finality
+    // must not depend on one (clamping or a clock step could reopen a decided intent).
+    // Sweep expired tombstones here (finish is the only place they are added) so the map
+    // stays bounded to intents resolved within the current deadline window.
+    const now = Date.now();
+    for (const [id, t] of this.resolved) if (now >= t.deadline) this.resolved.delete(id);
+    this.resolved.set(intentId, { resolution, deadline: deadline(entry.intent) });
     entry.resolve(resolution);
   }
 
@@ -283,6 +317,7 @@ export class PendingDecisions {
       entry.reject(err);
     }
     this.entries.clear();
+    this.resolved.clear(); // tombstones are timer-free; just drop them
   }
 }
 

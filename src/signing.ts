@@ -247,6 +247,23 @@ export class SigningServer {
     // challenge). It is also assertion-bound, so it cannot be altered.
     const ts = Date.parse(body.timestamp);
     if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > MAX_SIGNING_SKEW_MS) return json(400, { error: "stale or invalid timestamp" });
+    // Bind the receipt's timestamp to the Intent's deadline: the challenge phase is
+    // advisory — a client holding the passkey can skip it and self-mint a consistent
+    // receipt with any timestamp inside the ±skew band — so without this an approver
+    // could stamp their own approval AFTER a short deadline, recording a receipt past
+    // the window the audit relies on. record() gates the CURRENT clock against the
+    // deadline; this gates the STAMPED time.
+    //
+    // ONLY an upper bound, and no comparison to created_at. `ts` is the SERVER's click
+    // time (already tied to server-now by the ±skew staleness check above), whereas
+    // `created_at` is the AGENT's clock — comparing across those two clock domains would
+    // false-reject a genuine on-time approval whenever the agent's clock leads the
+    // server's (a wrongful denial on the multi-host path). Post-dating past the deadline
+    // is the only direction with security value, and `ts >= deadline` closes it; a
+    // receipt merely stamped earlier than created_at is the legitimate approver's own
+    // decision and carries no escalation.
+    if (ts >= deadline(found.intent))
+      return json(400, { error: "timestamp is past the intent's validity window (at or after the deadline)" });
 
     // Reconstruct the receipt the approver signed; record() re-verifies the
     // assertion against the bound credential + RP policy (the challenge binds

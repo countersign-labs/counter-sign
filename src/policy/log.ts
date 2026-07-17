@@ -6,9 +6,8 @@
 
 import { createHash } from "node:crypto";
 import { canonicalize } from "../core/canonical.js";
-import { CountersignError } from "../core/errors.js";
-import { publicKeyFromSecret, signContext, toB64url, utf8, verifyContext } from "../core/keys.js";
-import { POLICY_CONTEXT, type PolicyEntry } from "./types.js";
+import { utf8 } from "../core/keys.js";
+import type { PolicyEntry } from "./types.js";
 
 /** Canonical bytes of the unsigned entry — the message an admin key signs. */
 export function canonicalPolicyEntry(unsigned: Omit<PolicyEntry, "signature">): string {

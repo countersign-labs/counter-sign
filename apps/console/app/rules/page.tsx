@@ -1,5 +1,6 @@
 import { getState } from "../../lib/state";
 import { VerifyBanner, Empty, table, th, td } from "../ui";
+import { NewRuleForm } from "./new-rule";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export default function RulesPage() {
         which roles must approve, the quorum, the default on no-confirmation, and the review window.
       </p>
       <VerifyBanner state={s} />
+      <NewRuleForm org={s.org || "acme"} roleIds={s.roles.map((r) => r.id)} />
       {s.rules.length === 0 ? (
         <Empty>No rules defined yet.</Empty>
       ) : (

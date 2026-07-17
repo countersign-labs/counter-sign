@@ -64,4 +64,41 @@ describe("resolveRule", () => {
     const store = storeWith(role, { ...rule, action: undefined });
     expect(() => resolveRule("big-refund", { summary: "x" }, { store, registry: enrolledRegistry(), org: "o1" })).toThrow(/action/i);
   });
+
+  it("throws when an actor has multiple active keys", () => {
+    const store = storeWith(role, rule);
+    const reg = new ApproverRegistry();
+    reg.enroll("m:cfo", cfo.publicKey, org.secretKey, { pop: createEnrollmentProof("m:cfo", cfo.secretKey) });
+    const secondKp = generateKeypair();
+    reg.enroll("m:cfo", secondKp.publicKey, org.secretKey, { pop: createEnrollmentProof("m:cfo", secondKp.secretKey) });
+    expect(() => resolveRule("big-refund", { summary: "x" }, { store, registry: reg, org: "o1" })).toThrow(/multiple active keys/i);
+  });
+
+  it("throws when distinct approvers are fewer than the rule's quorum", () => {
+    const store = storeWith({ ...role, members: ["m:cfo"] }, { ...rule, quorum: 2, default: "reject" });
+    expect(() => resolveRule("big-refund", { summary: "x" }, { store, registry: enrolledRegistry(), org: "o1" })).toThrow(/quorum/i);
+  });
+
+  it("requires a risk_tier (from rule or request)", () => {
+    const store = storeWith(role, { ...rule, risk_tier: undefined });
+    expect(() => resolveRule("big-refund", { summary: "x", action: "billing.refund" }, { store, registry: enrolledRegistry(), org: "o1" })).toThrow(/risk_tier/i);
+  });
+
+  it("requires a summary", () => {
+    const store = storeWith(role, rule);
+    expect(() => resolveRule("big-refund", { summary: "", action: "billing.refund" }, { store, registry: enrolledRegistry(), org: "o1" })).toThrow(/summary/i);
+  });
+
+  it("dedups an actor referenced by multiple roles", () => {
+    const r1: Role = { id: "r1", org: "o1", name: "finance", members: ["m:cfo", "m:ceo"] };
+    const r2: Role = { id: "r2", org: "o1", name: "exec", members: ["m:cfo"] };
+    const admin = generateKeypair();
+    const log = new PolicyLog();
+    log.append({ kind: "admin-add", org: "o1", public_key: admin.publicKey, name: "root" }, admin.secretKey);
+    log.append({ kind: "role-set", role: r1 }, admin.secretKey);
+    log.append({ kind: "role-set", role: r2 }, admin.secretKey);
+    log.append({ kind: "rule-set", rule: { ...rule, roles: ["r1", "r2"], quorum: 2 } }, admin.secretKey);
+    const fields = resolveRule("big-refund", { summary: "x", action: "billing.refund" }, { store: log, registry: enrolledRegistry(), org: "o1" });
+    expect(fields.approvers.filter((a) => a.actor === "m:cfo").length).toBe(1);
+  });
 });

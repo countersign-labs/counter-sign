@@ -4,8 +4,8 @@ import { mkdtempSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadConsoleState } from "./store.js";
-import { seedSampleData } from "./seed.js";
+import { loadConsoleState } from "./store";
+import { seedSampleData } from "./seed";
 
 function seeded() {
   const dir = mkdtempSync(join(tmpdir(), "cs-console-"));

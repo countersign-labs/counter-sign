@@ -200,6 +200,37 @@ describe("PolicyLog.verifyChain", () => {
     expect(new PolicyLog([...log.entries, { ...unsigned, signature }]).verifyChain()).toBe(false);
   });
 
+  it("rejects a signed rule-set whose rule violates the quorum>1/default:approve invariant", () => {
+    // append() would reject this via assertChangeValid -> validateRule, so hand-build a
+    // signed entry whose change is the bad rule from the start (the signature is real —
+    // it's computed over the canonical unsigned entry that already contains the bad rule).
+    const log = bootstrapped();
+    const badRule: Rule = { ...rule, id: "u-bad", name: "bad", quorum: 2, default: "approve" };
+    const prev = hashEntry(log.entries[0]);
+    const unsigned = {
+      countersign: "0.2" as const, seq: 1,
+      change: { kind: "rule-set" as const, rule: badRule },
+      issued_at: "2026-01-01T00:00:00.000Z", prev, signer_public_key: rootA.publicKey,
+    };
+    const signature = signContext(rootA.secretKey, POLICY_CONTEXT, canonicalPolicyEntry(unsigned));
+    const forged = new PolicyLog([...log.entries, { ...unsigned, signature }]);
+    expect(forged.verifyChain()).toBe(false);
+  });
+
+  it("rejects a signed role-set whose role has zero members (validateRole)", () => {
+    const log = bootstrapped();
+    const badRole: Role = { ...role, id: "r-bad", name: "empty", members: [] };
+    const prev = hashEntry(log.entries[0]);
+    const unsigned = {
+      countersign: "0.2" as const, seq: 1,
+      change: { kind: "role-set" as const, role: badRole },
+      issued_at: "2026-01-01T00:00:00.000Z", prev, signer_public_key: rootA.publicKey,
+    };
+    const signature = signContext(rootA.secretKey, POLICY_CONTEXT, canonicalPolicyEntry(unsigned));
+    const forged = new PolicyLog([...log.entries, { ...unsigned, signature }]);
+    expect(forged.verifyChain()).toBe(false);
+  });
+
   it("is a total function: returns false (never throws) on a malformed entry", () => {
     const log = bootstrapped();
     const prev = hashEntry(log.entries[0]);
@@ -215,5 +246,20 @@ describe("PolicyLog.verifyChain", () => {
     const badLog = new PolicyLog([...log.entries, malformed]);
     expect(() => badLog.verifyChain()).not.toThrow();
     expect(badLog.verifyChain()).toBe(false);
+  });
+
+  it("expectedHead anchor: passes with the real head, fails on a stale/wrong head (rollback detection)", () => {
+    const log = bootstrapped();
+    log.append({ kind: "role-set", role }, rootA.secretKey);
+    const realHead = log.head();
+    expect(log.verifyChain(realHead)).toBe(true);
+
+    // Stale head simulating a rollback: length one short, hash of the entry that was
+    // the tip BEFORE the last append (i.e. the genesis entry's hash).
+    const staleHead = { length: log.entries.length - 1, hash: hashEntry(log.entries[0]) };
+    expect(log.verifyChain(staleHead)).toBe(false);
+
+    // Wrong hash at the right length.
+    expect(log.verifyChain({ length: realHead.length, hash: "deadbeef" })).toBe(false);
   });
 });

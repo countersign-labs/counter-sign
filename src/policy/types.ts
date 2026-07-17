@@ -74,6 +74,10 @@ export interface PolicyStore {
   listRoles(org: string): Role[];
   listRules(org: string): Rule[];
   listAdmins(org: string): AdminKey[];
+  /** Verify the store's underlying log against its own chain (and, if given, an
+   *  externally-anchored head to detect rollback/tail-truncation). resolveRule must
+   *  call this before trusting any rule read from the store (spec §5: "verified state"). */
+  verify(expectedHead?: { length: number; hash: string }): boolean;
 }
 
 /** The specific request context an agent supplies when resolving a rule. */

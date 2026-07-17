@@ -5,6 +5,8 @@ import { normalizeActor } from "../core/countersignature.js";
 import type { Role, Rule } from "./types.js";
 
 const MAX_TIMEOUT_SECONDS = 2147483; // = src/core/intent.ts
+// RISK_TIERS is not exported from src/core/intent.ts — mirror the literal set here.
+const RISK_TIERS = new Set(["low", "medium", "high", "critical"]);
 
 export function validateRole(role: Role): void {
   if (!role || typeof role !== "object") throw new CountersignError("role must be an object");
@@ -35,4 +37,6 @@ export function validateRule(rule: Rule): void {
     throw new CountersignError(`rule ${rule.name}: quorum > 1 must not combine with default: approve (a timeout would bypass required approvers)`);
   if (!Number.isInteger(rule.timeout_seconds) || rule.timeout_seconds < 1 || rule.timeout_seconds > MAX_TIMEOUT_SECONDS)
     throw new CountersignError(`rule ${rule.name}: timeout_seconds must be an integer in [1, ${MAX_TIMEOUT_SECONDS}]`);
+  if (rule.risk_tier !== undefined && !RISK_TIERS.has(rule.risk_tier))
+    throw new CountersignError(`rule ${rule.name}: risk_tier "${rule.risk_tier}" is not one of low|medium|high|critical`);
 }

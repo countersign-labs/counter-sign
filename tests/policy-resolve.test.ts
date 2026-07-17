@@ -89,6 +89,25 @@ describe("resolveRule", () => {
     expect(() => resolveRule("big-refund", { summary: "", action: "billing.refund" }, { store, registry: enrolledRegistry(), org: "o1" })).toThrow(/summary/i);
   });
 
+  it("fails closed when the underlying policy log is tampered (unverified store)", () => {
+    const store = storeWith(role, rule);
+    // Confirm the valid path works before tampering.
+    expect(() =>
+      resolveRule("big-refund", { summary: "x", action: "billing.refund" }, { store, registry: enrolledRegistry(), org: "o1" }),
+    ).not.toThrow();
+
+    // Tamper a persisted entry's change post-signature (bypasses append()'s validation,
+    // simulating a signed-but-then-edited log file on disk).
+    const entries = JSON.parse(JSON.stringify(store.entries)) as typeof store.entries;
+    (entries[2].change as { rule: Rule }).rule.quorum = 99;
+    const tampered = new PolicyLog(entries);
+    expect(tampered.verifyChain()).toBe(false);
+
+    expect(() =>
+      resolveRule("big-refund", { summary: "x", action: "billing.refund" }, { store: tampered, registry: enrolledRegistry(), org: "o1" }),
+    ).toThrow(/verification|tampered|unverified/i);
+  });
+
   it("dedups an actor referenced by multiple roles", () => {
     const r1: Role = { id: "r1", org: "o1", name: "finance", members: ["m:cfo", "m:ceo"] };
     const r2: Role = { id: "r2", org: "o1", name: "exec", members: ["m:cfo"] };

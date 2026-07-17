@@ -32,4 +32,8 @@ describe("validateRule", () => {
     expect(() => validateRule(rule({ timeout_seconds: 2147484 }))).toThrow();
   });
   it("rejects an empty roles list", () => expect(() => validateRule(rule({ roles: [] }))).toThrow());
+  it("rejects an out-of-range risk_tier", () =>
+    expect(() => validateRule(rule({ risk_tier: "bogus" as never }))).toThrow(/risk_tier/i));
+  it("accepts a valid risk_tier", () =>
+    expect(() => validateRule(rule({ risk_tier: "high" }))).not.toThrow());
 });

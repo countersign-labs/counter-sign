@@ -7,6 +7,30 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 
 ## [Unreleased]
 
+### Added
+- **Conformance test vectors** ([`vectors/`](vectors/)) — a deterministic,
+  language-neutral fixture set any independent implementation can check itself
+  against, so signature interop is *provable* rather than assumed. Covers fixed
+  test keys, canonical-JSON known-answers (where implementations most often
+  diverge), low-level `signContext` message + signature vectors, signed Intents,
+  keyed/vouched/timeout-default receipts, `verifyResolution` accept **and** reject
+  cases (under-quorum, forged-quorum, wrong-authority-key), and the receipt-log
+  hash-chain head. Shipped in the npm package (`files`).
+- **Conformance suite** ([`tests/conformance.test.ts`](tests/conformance.test.ts))
+  — re-verifies the reference implementation against the *committed* vectors on
+  every `npm test`, so a canonicalization or signing change that would break
+  cross-implementation interop surfaces as a failing test plus a reviewable vector
+  diff, instead of a silent wire-format drift.
+- **`npm run gen:vectors`** ([`scripts/gen-vectors.ts`](scripts/gen-vectors.ts))
+  regenerates the vectors byte-identically (ed25519 is deterministic; all ids and
+  timestamps fixed), and [`vectors/README.md`](vectors/README.md) documents the
+  signing algorithm (key encoding, canonical JSON, signed bytes, contexts, chain)
+  and how to write a runner in another language.
+
+### Notes
+- No wire-format change; existing receipts still verify. Passkey/WebAuthn receipts
+  (non-deterministic P-256) are not yet vectored — planned.
+
 ## [0.1.3] — 2026-07-15
 
 ### Security

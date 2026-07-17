@@ -44,7 +44,8 @@
     "LICENSE",
     "LICENSE-CC-BY-4.0.txt",
     "NOTICE",
-    "README.md"
+    "README.md",
+    "vectors"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -60,7 +61,8 @@
     "demo:telegram": "tsx examples/telegram.ts",
     "demo:discord": "tsx examples/discord.ts",
     "demo:slack": "tsx examples/slack.ts",
-    "demo:whatsapp": "tsx examples/whatsapp.ts"
+    "demo:whatsapp": "tsx examples/whatsapp.ts",
+    "gen:vectors": "tsx scripts/gen-vectors.ts"
   },
   "dependencies": {
     "nodemailer": "^9.0.3"

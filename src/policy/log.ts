@@ -24,6 +24,15 @@ export function hashEntry(entry: PolicyEntry): string {
 
 const GENESIS_PREV: null = null;
 
+/** The org a change belongs to. */
+function changeOrg(change: PolicyChange): string {
+  switch (change.kind) {
+    case "role-set": return change.role.org;
+    case "rule-set": return change.rule.org;
+    default: return change.org; // admin-add | admin-revoke | role-delete | rule-delete
+  }
+}
+
 export class PolicyLog implements PolicyStore {
   private _entries: PolicyEntry[];
   constructor(entries: PolicyEntry[] = []) {
@@ -46,12 +55,15 @@ export class PolicyLog implements PolicyStore {
    *  admin-add: the signer key equals the key being added (the root admin bootstraps itself). */
   append(change: PolicyChange, adminSecret: string): PolicyEntry {
     const signer = publicKeyFromSecret(adminSecret);
+    const org = changeOrg(change);
     const state = this.foldState(this._entries); // state BEFORE this entry
     const isGenesis = this._entries.length === 0;
     if (isGenesis) {
       if (change.kind !== "admin-add") throw new CountersignError("policy log genesis must be an admin-add");
       if (change.public_key !== signer) throw new CountersignError("policy log genesis admin-add must be self-signed (signer must equal the added key)");
     } else {
+      const logOrg = changeOrg(this._entries[0].change);
+      if (org !== logOrg) throw new CountersignError(`policy change org "${org}" does not match policy log org "${logOrg}"`);
       if (!state.admins.has(signer)) throw new CountersignError(`signer ${signer} is not an active admin`);
     }
     this.assertChangeValid(change, state, isGenesis);
@@ -88,6 +100,8 @@ export class PolicyLog implements PolicyStore {
       case "rule-delete":
         if (!state.rules.has(change.id)) throw new CountersignError(`rule ${change.id} does not exist`);
         return;
+      default:
+        throw new CountersignError(`unknown policy change kind: ${(change as { kind?: string }).kind}`);
     }
   }
 
@@ -104,6 +118,8 @@ export class PolicyLog implements PolicyStore {
         case "role-delete": roles.delete(change.id); break;
         case "rule-set": rules.set(change.rule.id, change.rule); break;
         case "rule-delete": rules.delete(change.id); break;
+        default:
+          throw new CountersignError(`unknown policy change kind: ${(change as { kind?: string }).kind}`);
       }
     }
     return { admins, roles, rules };

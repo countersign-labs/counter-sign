@@ -55,8 +55,8 @@ npm run demo:email                   # full email flow, offline, no accounts
 
 ## Adapters
 
-All six adapters implement one interface — `deliver(intent)` plus a
-decision callback returning a `Countersignature`. The five network channels
+All seven adapters implement one interface — `deliver(intent)` plus a
+decision callback returning a `Countersignature`. The five chat/email channels
 are configured via env vars (see [.env.example](.env.example) and
 [adapters/README.md](adapters/README.md) for setup); the local approver needs
 none:
@@ -68,25 +68,83 @@ none:
 | Slack    | Medium — app, bot token, signing secret, public URL | Block Kit buttons → interactivity webhook (signature-verified) |
 | WhatsApp | High — Meta app, approved template, webhook | Template quick-reply buttons → webhook (Meta Cloud API only) |
 | Email    | Low — any SMTP credentials | Signed single-use links → confirm-page POST (GET never decides) |
+| Signing link | Medium — mount a `SigningServer`, pick a delivery callback | Per-approver deep-links → passkey (WebAuthn) ceremony in the approver's browser |
 | Local    | None | stdin approve/reject (demos, tests, CI) |
 
 A Countersignature is byte-for-byte the same shape and equally verifiable
 whichever adapter produced it — receipts don't care whether the yes came
-from a chat button or an email link.
+from a chat button, an email link, or a passkey ceremony.
 
 **Two-person / M-of-N approval.** Set `quorum: N` on an Intent to require N
-*distinct* approvers before the action runs; any single approver vetoes. This
-works on the **chat channels**, where distinct people can each respond. The
-single-recipient **email** adapter and the single-terminal **local** adapter
-support `quorum: 1` only and refuse more — neither can independently
-authenticate distinct humans, so they don't pretend to. (`npm run demo:quorum`
-illustrates the accumulation/veto mechanism with simulated approvers.)
+*distinct* approvers before the action runs; any single approver vetoes. Two
+strengths exist, and the Intent's `approvers` declare which one you get:
 
-Distinctness is counted over the identities the **trusted authority** records,
-so `quorum` is a control that authority enforces — not cryptographic separation
-of duty against a compromised authority key (a holder of that key can mint N
-distinct receipts). Binding each approver to a distinct key is on the roadmap;
-see the spec's *Trust model*.
+- **Vouched** (chat channels): the trusted authority observes the person's
+  response and vouches for it with the authority key. That is enforcement, not
+  proof — a holder of the authority key could mint such a receipt — so vouched
+  slots are accepted only at `quorum: 1` (you may still list several vouched
+  approvers; any one of them decides). Mixing a vouched slot into `quorum > 1`
+  is rejected at construction.
+- **Keyed** (`quorum > 1` requires it): every approver signs their own receipt
+  with their **own key, which the authority never holds** — four-eyes becomes
+  *cryptographic separation of duty*: a compromised authority server can neither
+  forge the quorum nor swap an approver's bound key (each key is pinned inside
+  the agent-signed Intent). A keyed approver signs either with a raw ed25519 key
+  via the `approve` CLI, or with a **passkey** in their browser (next section).
+
+Delivery constraints still apply per channel: the single-recipient **email**
+adapter and single-terminal **local** adapter deliver `quorum: 1` only and
+refuse more (neither can independently authenticate distinct humans), and the
+chat/email/local adapters are vouched-only. The **signing-link** adapter
+delivers keyed Intents whose approvers are all **passkeys**; a raw-keyed
+(bot/CLI) approver signs out of band with the `approve` CLI instead of
+receiving a link, so an Intent that mixes passkey and raw-keyed approvers
+needs a custom delivery adapter — verification accepts the mixed quorum
+either way.
+
+## Passkey approvals (browser WebAuthn)
+
+The human-grade keyed path: each approver taps a personal signing link, sees
+what they are approving, and confirms with their passkey (Touch ID / Face ID /
+security key). The resulting receipt is signed by *their* authenticator against
+the credential bound in the Intent — the server only relays and verifies, so it
+cannot forge an approval.
+
+```ts
+import { PendingDecisions, SigningServer, wrapAction } from "@countersignlabs/counter-sign";
+import { SigningLinkAdapter } from "@countersignlabs/counter-sign/adapters/signing-link";
+
+const server = new SigningServer({
+  pending: new PendingDecisions(),
+  authorityKey: process.env.COUNTERSIGN_AUTHORITY_KEY!,      // signs the single-use links
+  webauthn: { rpId: "approve.example.com", allowedOrigins: ["https://approve.example.com"] },
+  baseUrl: "https://approve.example.com",
+});
+httpServer.on("request", server.handler());                  // GET/POST /sign
+
+const adapter = new SigningLinkAdapter({
+  server,
+  notify: ({ actor, url }) => sendHowYouLike(actor, url),    // email, chat DM, SMS…
+});
+
+const deploy = wrapAction(deployProd,
+  { action: "deploy.prod", summary: "Deploy v2.1.0", risk_tier: "critical",
+    approvers: [
+      { actor: "m:ceo", mode: "keyed", public_key: CEO_PASSKEY },   // webauthn-p256:… | webauthn-ed25519:…
+      { actor: "m:cto", mode: "keyed", public_key: CTO_PASSKEY },
+    ],
+    quorum: 2, timeout: 600, default: "reject" },
+  adapter, { agent, authorityKey: process.env.COUNTERSIGN_AUTHORITY_KEY! });
+```
+
+Each link is single-use and expires with the Intent; the signing page is
+self-contained (no external resources, CSP-pinned) and the assertion challenge
+binds the approver's passkey signature to the exact receipt being minted —
+decision, actor, intent and timestamp. Delivery fails closed: if no approver
+could be reached (or any approver under `default: "approve"`), the action never
+runs. Enroll approver credentials with the `enroll` CLI (an org-root-attested,
+hash-chained registry); passkey receipts are covered by the conformance
+vectors ([`vectors/`](vectors/)).
 
 ## Why receipts, not booleans
 

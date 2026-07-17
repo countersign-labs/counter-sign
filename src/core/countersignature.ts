@@ -77,6 +77,22 @@ export function signDecision(
 }
 
 /**
+ * The unsigned receipt fields a passkey (WebAuthn) assertion challenge is computed
+ * over. THE single definition of the recipe: the SigningServer's page signs it, the
+ * verifier below checks it, and the vector generator mints fixtures through it — so
+ * signer, verifier, and vectors cannot drift from each other by copy-paste.
+ */
+export function unsignedReceipt(intentId: string, decision: "approve" | "reject", actor: string, credential: string, timestamp: string) {
+  return { countersign: COUNTERSIGN_VERSION, intent_id: intentId, decision, actor, policy: "approver" as const, timestamp, public_key: credential };
+}
+
+/** The WebAuthn assertion challenge for an unsigned receipt:
+ *  base64url(sha256(utf8(`${COUNTERSIGNATURE_CONTEXT}\n${canonical unsigned receipt}`))). */
+export function challengeFor(unsigned: object): string {
+  return toB64url(createHash("sha256").update(utf8(`${COUNTERSIGNATURE_CONTEXT}\n${canonicalize(unsigned)}`)).digest());
+}
+
+/**
  * Verify a Countersignature.
  *
  * With no options this checks INTEGRITY only: that the embedded `public_key`
@@ -102,9 +118,7 @@ export function verifyCountersignature(cs: Countersignature, opts: VerifyOptions
       if (!passkey || !webauthn || typeof webauthn !== "object" || !opts.webauthn) return false;
       // The assertion binds to THIS decision via challenge = digest of the
       // canonical receipt (minus signature and webauthn), domain-separated.
-      const challenge = toB64url(
-        createHash("sha256").update(utf8(`${COUNTERSIGNATURE_CONTEXT}\n${canonicalize(unsigned)}`)).digest(),
-      );
+      const challenge = challengeFor(unsigned);
       return verifyWebAuthnAssertion(webauthn, signature, {
         credential: cs.public_key,
         expectedChallenge: challenge,

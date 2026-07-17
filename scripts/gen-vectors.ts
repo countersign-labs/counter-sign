@@ -23,10 +23,11 @@ import { join } from "node:path";
 import { canonicalize } from "../src/core/canonical.js";
 import { publicKeyFromSecret, signContext, toB64url, utf8 } from "../src/core/keys.js";
 import { createIntent } from "../src/core/intent.js";
-import { signDecision } from "../src/core/countersignature.js";
+import { signDecision, unsignedReceipt, verifyCountersignature } from "../src/core/countersignature.js";
 import { deadline } from "../src/core/defaults.js";
 import { ReceiptLog } from "../src/receipt-log.js";
-import { INTENT_CONTEXT, COUNTERSIGNATURE_CONTEXT, LINK_CONTEXT, type Intent, type Resolution } from "../src/core/types.js";
+import { FIXED_DECIDED, P256_INTENT_ID, RP_ID, WEBAUTHN_ORIGIN, mintPasskeyReceipt, signWithEd25519 } from "./_passkey.js";
+import { INTENT_CONTEXT, COUNTERSIGNATURE_CONTEXT, LINK_CONTEXT, type Countersignature, type Intent, type Resolution } from "../src/core/types.js";
 
 /** A fixed, low-entropy TEST seed: 32 bytes all set to `b`, base64url-encoded. NOT for production. */
 const seed = (b: number): string => toB64url(Buffer.alloc(32, b));
@@ -42,7 +43,8 @@ const K = {
 const pub = (s: string) => publicKeyFromSecret(s);
 
 const FIXED_CREATED = "2026-01-01T00:00:00.000Z";
-const FIXED_DECIDED = "2026-01-01T00:01:00.000Z";
+// FIXED_DECIDED (the receipts' timestamp) is imported from ./_passkey.js — the passkey
+// minting recipe shares it, and there must be exactly one copy.
 
 /** Build a signed Intent deterministically: normalize/validate via createIntent, then pin the
  *  otherwise-random intent_id + created_at and re-sign, so the fixture is byte-stable. */
@@ -85,6 +87,60 @@ const CHAIN_GENESIS = toB64url(createHash("sha256").update(utf8("countersign-rec
 
 // A tampered Intent (summary changed after signing) — must FAIL verifyIntent.
 const tamperedIntent: Intent = { ...vouchedIntent, summary: vouchedIntent.summary + " (edited)" };
+
+// ── WebAuthn (passkey) receipts ────────────────────────────────────────────────────────────
+// Recipe + rationale ship in `webauthn.note` below; the minting machinery (and the RP /
+// timestamp constants) is shared with scripts/mint-p256-vector.ts via ./_passkey.ts.
+const webauthnPolicy = { rpId: RP_ID, allowedOrigins: [WEBAUTHN_ORIGIN] };
+const uvPolicy = { ...webauthnPolicy, requireUserVerification: true };
+
+const passkeySeed = { ceo: seed(0x21), cto: seed(0x22), rogue: seed(0xfe) };
+const passkeyCred = (s: string) => `webauthn-ed25519:${pub(s)}`;
+
+const passkeyIntent = fixedIntent("33333333-3333-4333-8333-333333333333", {
+  action: "prod.deploy", summary: "Deploy 2.5.0 to production", risk_tier: "critical",
+  approvers: [
+    { actor: "m:ceo", mode: "keyed", public_key: passkeyCred(passkeySeed.ceo) },
+    { actor: "m:cto", mode: "keyed", public_key: passkeyCred(passkeySeed.cto) },
+  ], quorum: 2, timeout: 300, default: "reject",
+});
+
+/** Mint m:ceo's receipt with an optional assertion override / rogue signing seed —
+ *  the honest fields are identical across the negative cases. */
+const mintCeo = (over?: { flags?: number; origin?: string; crossOrigin?: boolean }, signSeed = passkeySeed.ceo) =>
+  mintPasskeyReceipt(passkeyIntent.intent_id, "approve", "m:ceo", passkeyCred(passkeySeed.ceo), FIXED_DECIDED, signWithEd25519(signSeed), over);
+
+const ceoPasskey = mintCeo();
+const ctoPasskey = mintPasskeyReceipt(passkeyIntent.intent_id, "approve", "m:cto", passkeyCred(passkeySeed.cto), FIXED_DECIDED, signWithEd25519(passkeySeed.cto));
+const upOnlyPasskey = mintCeo({ flags: 0x01 });
+const wrongOriginPasskey = mintCeo({ origin: "https://evil.example.com" });
+const crossOriginPasskey = mintCeo({ crossOrigin: true });
+const noUpPasskey = mintCeo({ flags: 0x04 });
+// Claims m:ceo's bound credential but was signed by the ROGUE authenticator key.
+const forgedPasskey = mintCeo(undefined, passkeySeed.rogue);
+// A valid receipt re-pointed at a DIFFERENT intent — the challenge no longer binds.
+const replayedPasskey: Countersignature = { ...ceoPasskey, intent_id: keyedIntent.intent_id };
+
+// FROZEN P-256 assertion (minted by scripts/mint-p256-vector.ts — run it manually and
+// paste its output here whenever the receipt recipe changes; the private key is
+// discarded at mint time). Re-verified below on every run.
+const P256_FROZEN = {
+  credential: "webauthn-p256:BIN3wUkbiIsb8C-eCs6HAKHL3pwNnfuIFQKZlsm78_fJG2t0xkRIiMe9y_U5MA1Q1MwKzfKwA1S24Aqgfi0MHQ8",
+  authenticator_data: "_pgLuHQFPJeFs-A-H3xCq_RfY87Hw7a3L3x4Lr7rEKkFAAAAAQ",
+  client_data_json: "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiQU1ral9vZ0NYc0FiemdfalJWbFZKeDJEdGdwcXE1YjMyaDBDUUY3bTFQTSIsIm9yaWdpbiI6Imh0dHBzOi8vYXBwcm92ZS5leGFtcGxlLmNvbSJ9",
+  signature: "MEYCIQCJLLQQBa9h5pUhNyffQDn1y9REyQXRLvwYGz90j_sXGQIhALSKLTF9ZD8VYl92uVEE_SJDD4V1A0TpqRlt9gLQ2suT",
+} as const;
+const p256Intent = fixedIntent(P256_INTENT_ID, {
+  action: "treasury.wire", summary: "Wire $250,000 to escrow", risk_tier: "critical",
+  approvers: [{ actor: "m:cfo", mode: "keyed", public_key: P256_FROZEN.credential }], quorum: 1, timeout: 300, default: "reject",
+});
+const p256Receipt: Countersignature = {
+  ...unsignedReceipt(p256Intent.intent_id, "approve", "m:cfo", P256_FROZEN.credential, FIXED_DECIDED),
+  signature: P256_FROZEN.signature,
+  webauthn: { authenticator_data: P256_FROZEN.authenticator_data, client_data_json: P256_FROZEN.client_data_json },
+};
+if (!verifyCountersignature(p256Receipt, { webauthn: webauthnPolicy }))
+  throw new Error("frozen P-256 assertion no longer verifies — the receipt recipe drifted; re-mint the frozen constant");
 
 /** The canonical JSON of an Intent's signed body (everything except the signature). */
 function unsignedCanonical(i: Intent): string {
@@ -146,6 +202,29 @@ const vectors = {
     { name: "forged-quorum", expect: "invalid", note: "m:cto's slot signed by the rogue key", expected_authority_public_key: pub(K.authority), intent: keyedIntent, resolution: { decision: "approve", policy: "approver", countersignatures: [ceoApprove, forgedCto] } as Resolution },
     { name: "wrong-authority-key", expect: "invalid", note: "vouched receipt verified against the wrong authority key", expected_authority_public_key: pub(K.rogue), intent: vouchedIntent, resolution: { decision: "approve", policy: "approver", countersignatures: [vouchedApprove] } as Resolution },
   ],
+  webauthn: {
+    note: "Passkey receipts: `signature` is the authenticator assertion over authenticatorData || SHA256(clientDataJSON); the clientData challenge is base64url(sha256(utf8(`${countersignature context}\\n${canonical unsigned receipt}`))) where the unsigned receipt omits `signature` and `webauthn`. EVERY case carries the `policy` to verify under; `policy: null` means verify WITHOUT an RP policy (must fail closed). ed25519 cases are fully deterministic (RFC 8032); the P-256 case is frozen (ECDSA signing is randomized) — verifying it is still deterministic.",
+    receipts: [
+      { name: "ed25519-approve-ceo", valid: true, policy: webauthnPolicy, receipt: ceoPasskey },
+      { name: "ed25519-approve-cto", valid: true, policy: webauthnPolicy, receipt: ctoPasskey },
+      { name: "ed25519-up-only-ok-when-uv-not-required", valid: true, policy: webauthnPolicy, note: "User Present alone satisfies a policy that does not require User Verification", receipt: upOnlyPasskey },
+      { name: "p256-approve-frozen", valid: true, policy: webauthnPolicy, note: "frozen assertion (see section note)", receipt: p256Receipt },
+      { name: "no-rp-policy-fails-closed", valid: false, policy: null, note: "the SAME receipt as ed25519-approve-ceo; a passkey receipt without an RP policy must not verify", receipt: ceoPasskey },
+      { name: "wrong-origin-phishing", valid: false, policy: webauthnPolicy, note: "assertion produced at an origin outside allowedOrigins", receipt: wrongOriginPasskey },
+      { name: "cross-origin-iframe", valid: false, policy: webauthnPolicy, note: "clientData.crossOrigin === true (ceremony ran inside a cross-origin frame)", receipt: crossOriginPasskey },
+      { name: "user-present-flag-missing", valid: false, policy: webauthnPolicy, note: "UP flag (0x01) unset — User Present is always required", receipt: noUpPasskey },
+      { name: "uv-required-but-not-verified", valid: false, policy: uvPolicy, note: "UP-only assertion rejected when the policy requires User Verification", receipt: upOnlyPasskey },
+      { name: "forged-wrong-authenticator-key", valid: false, policy: webauthnPolicy, note: "claims m:ceo's bound credential but signed by a different authenticator key", receipt: forgedPasskey },
+      { name: "replayed-onto-different-intent", valid: false, policy: webauthnPolicy, note: "the challenge binds the receipt to its intent_id — a replay onto another intent must fail", receipt: replayedPasskey },
+    ],
+    resolutions: [
+      { name: "passkey-2of2-approve", expect: "valid", policy: webauthnPolicy, expected_authority_public_key: pub(K.authority), intent: passkeyIntent, resolution: { decision: "approve", policy: "approver", countersignatures: [ceoPasskey, ctoPasskey] } as Resolution },
+      { name: "p256-single-approve-frozen", expect: "valid", policy: webauthnPolicy, expected_authority_public_key: pub(K.authority), intent: p256Intent, resolution: { decision: "approve", policy: "approver", countersignatures: [p256Receipt] } as Resolution },
+      { name: "passkey-no-rp-policy-fails-closed", expect: "invalid", policy: null, note: "the same 2-of-2 approval must NOT verify without an RP policy", expected_authority_public_key: pub(K.authority), intent: passkeyIntent, resolution: { decision: "approve", policy: "approver", countersignatures: [ceoPasskey, ctoPasskey] } as Resolution },
+      { name: "passkey-forged-slot", expect: "invalid", policy: webauthnPolicy, note: "m:ceo's slot filled by an assertion from the wrong authenticator key", expected_authority_public_key: pub(K.authority), intent: passkeyIntent, resolution: { decision: "approve", policy: "approver", countersignatures: [forgedPasskey, ctoPasskey] } as Resolution },
+      { name: "passkey-under-quorum", expect: "invalid", policy: webauthnPolicy, note: "only 1 of 2 required passkey approvals", expected_authority_public_key: pub(K.authority), intent: passkeyIntent, resolution: { decision: "approve", policy: "approver", countersignatures: [ceoPasskey] } as Resolution },
+    ],
+  },
   chain: {
     note: "append these receipts in order to a fresh hash-chained ReceiptLog; head() must equal expected_head",
     receipts: [ceoApprove, ctoApprove],
@@ -155,4 +234,4 @@ const vectors = {
 
 const out = join(process.cwd(), "vectors", "countersign-vectors.json");
 writeFileSync(out, JSON.stringify(vectors, null, 2) + "\n");
-process.stdout.write(`wrote ${out}\n  ${vectors.keys.length} keys · ${vectors.canonical.length} canonical · ${vectors.intents.length} intents · ${vectors.countersignatures.length} receipts · ${vectors.resolutions.length} resolutions · chain head ${head.hash.slice(0, 12)}…\n`);
+process.stdout.write(`wrote ${out}\n  ${vectors.keys.length} keys · ${vectors.canonical.length} canonical · ${vectors.intents.length} intents · ${vectors.countersignatures.length} receipts · ${vectors.resolutions.length} resolutions · ${vectors.webauthn.receipts.length}+${vectors.webauthn.resolutions.length} webauthn · chain head ${head.hash.slice(0, 12)}…\n`);

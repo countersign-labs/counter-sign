@@ -46,6 +46,7 @@ this for machines; here it is for humans.
 | `intents` | a signed `Intent`, its `canonical_unsigned`, and whether it should verify | `canonical_json(intent − signature) == canonical_unsigned`; `verify_intent(intent) == valid` |
 | `countersignatures` | a `receipt`, its `signer_public_key`, and `valid` | `verify_countersignature(receipt, trustedKeys=[signer_public_key]) == valid` (the `forged-wrong-key` case must be **rejected**) |
 | `resolutions` | `{ intent, resolution, expected_authority_public_key, expect }` | `verify_resolution(...)` succeeds iff `expect == "valid"` (covers under-quorum, forged quorum, and wrong-authority-key negatives) |
+| `webauthn` | passkey (WebAuthn) receipts + resolutions, each with the RP `policy` to verify under (`null` = verify with **no** policy) | `verify_countersignature(receipt, trustedKeys=[receipt.public_key], webauthn=policy) == valid`; resolutions as in `resolutions` but passing `policy`. The negatives (wrong origin, cross-origin frame, missing UP, UV required, forged authenticator key, cross-intent replay, no-policy fail-closed) must all be **rejected** |
 | `chain` | receipts to append in order + `expected_head` | append to a fresh chained log; `head() == expected_head` |
 
 ## Writing a runner in another language
@@ -62,6 +63,11 @@ this for machines; here it is for humans.
 
 v0.2 vectors cover the deterministic, interop-critical surface: canonical JSON, ed25519 key
 derivation and signing, Intent/Countersignature signing + verification, `verifyResolution`
-accept/reject, and the receipt-log hash chain. **Passkey / WebAuthn receipts are not yet vectored**
-— P-256 WebAuthn assertions are non-deterministic, so they need captured verify-only fixtures; that
-is planned. The raw-ed25519 keyed path here **is** the base signer the passkey path is layered on.
+accept/reject, the receipt-log hash chain, and **passkey / WebAuthn receipts** (`webauthn`).
+The WebAuthn assertion challenge is `base64url(sha256(utf8(context + "\n" + canonical(unsigned
+receipt))))` — the same signed-bytes recipe as everything else, hashed to fit a WebAuthn
+challenge. `webauthn-ed25519` cases are fully deterministic (RFC 8032). The `webauthn-p256`
+case is a **frozen verify-only fixture** — ECDSA signing is randomized, so it was minted once
+(the private key discarded) and the generator re-verifies it on every run; *verifying* the
+fixed assertion is deterministic in any language. The raw-ed25519 keyed path here **is** the
+base signer the passkey path is layered on.

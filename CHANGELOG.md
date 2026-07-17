@@ -7,6 +7,34 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
 
 ## [Unreleased]
 
+### Changed
+- **Human passkey / WebAuthn signing promoted to stable** (was `@experimental` in 0.2.0).
+  The `SigningServer` HTTP surface (GET/POST `/sign`, the signed single-use link token, the
+  two-phase challenge→record protocol) and the `SigningLinkAdapter` delivery/collection
+  contract are now frozen. No wire or API change — the promotion removes the experimental
+  caveat, adds conformance vectors for the passkey path, and documents the surface
+  (README *Passkey approvals*). Re-validated end to end by the browser + WebAuthn
+  human-simulation harness (approve / veto / timeout-Default / wrong-key).
+- README quorum docs updated to v0.2 reality: per-approver-key quorum is cryptographic
+  separation of duty (the stale "binding each approver to a distinct key is on the
+  roadmap" note predated 0.2.0), the adapter table now includes the signing-link
+  channel, and per-channel delivery constraints (email/local `quorum: 1`, vouched-only
+  chat channels, all-passkey signing-link delivery) are stated explicitly.
+- The passkey receipt/challenge recipe (`unsignedReceipt` / `challengeFor`) now has a
+  single definition in `core/countersignature.ts`, consumed by the signing page, the
+  verifier, and the vector generator alike — signer/verifier/vectors can no longer
+  drift by copy-paste. Internal refactor; no public-API or wire change.
+
+### Added
+- **Conformance vectors for passkey / WebAuthn receipts** (`webauthn` section,
+  [`vectors/`](vectors/)): deterministic `webauthn-ed25519` accept cases, a frozen
+  verify-only `webauthn-p256` fixture (ECDSA signing is randomized; the generator
+  re-verifies the fixture on every run), and the negatives — wrong origin, cross-origin
+  frame, missing User-Present, UV-required-but-absent, forged authenticator key,
+  cross-intent replay, and the no-RP-policy fail-closed rule — plus resolution-level
+  accept/reject including a 2-of-2 passkey quorum, a forged slot, and under-quorum.
+  346 tests.
+
 ## [0.2.0] — 2026-07-17
 
 Per-approver-key quorum: `quorum > 1` is now **cryptographic separation of duty**, not a

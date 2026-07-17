@@ -1,5 +1,6 @@
 import { getState } from "../../lib/state";
 import { VerifyBanner, Empty, fingerprint } from "../ui";
+import { ManageAdmins } from "./manage-admins";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export default function AdminsPage() {
         of these keys; the console holds none of them.
       </p>
       <VerifyBanner state={s} />
+      <ManageAdmins org={s.org || "acme"} admins={s.admins.map((a) => ({ public_key: a.public_key, name: a.name }))} />
       {s.admins.length === 0 ? (
         <Empty>No admin keys — the policy log has not been bootstrapped.</Empty>
       ) : (

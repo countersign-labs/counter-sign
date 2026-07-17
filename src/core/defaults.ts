@@ -308,7 +308,19 @@ export async function awaitWithDefault(
   const expectedDefaultDecision: "approve" | "reject" = quorumOf(intent) > 1 ? "reject" : intent.default;
   const guarded: Promise<Resolution> = resolution.then(
     (r) => {
-      if (Date.now() >= deadline(intent)) return mintDefault(intent, authoritySecret);
+      if (Date.now() >= deadline(intent)) {
+        // A decision OBSERVED at/after the deadline is normally discarded for the Default
+        // (a stale/overdue adapter must not beat the timeout). But NEVER let an approve
+        // Default override a reject: a veto recorded in-window — record()/settle() gate on
+        // the clock, so it was in time — whose promise reaction merely runs a microtask
+        // later is still a veto. Converting a human's NO into a YES is the one outcome this
+        // gate must never produce, and it is reachable only for default:"approve" (quorum 1;
+        // quorum > 1 forbids default:"approve" and mintDefault forces reject anyway). Honor
+        // the reject; verifyResolution below still adjudicates it — a genuine listed-approver
+        // veto passes, a forged/unlisted/contradictory one fails closed (never approves).
+        if (expectedDefaultDecision === "approve" && (r as Resolution | null)?.decision === "reject") return r;
+        return mintDefault(intent, authoritySecret);
+      }
       // An adapter delivering a Default before the deadline is discarded so the
       // runtime's own timer mints the genuine one on time. Recognise that ONLY
       // when the receipt is EXACTLY what the runtime would mint at the deadline:

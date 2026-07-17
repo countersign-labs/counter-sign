@@ -103,6 +103,37 @@ describe("timeout fires the declared Default", () => {
   });
 });
 
+describe("a human veto is never flipped to an approve Default at the deadline boundary", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("honors a reject recorded in-window but OBSERVED a microtask past the deadline (default=approve)", async () => {
+    vi.setSystemTime(new Date("2026-06-01T00:00:00.000Z"));
+    const intent = intentWith(300, "approve"); // quorum 1, default approve → deadline +5min
+    const veto = human(signDecision(intent, "reject", "local:you", authority)); // a valid veto
+    let resolveFn!: (r: Resolution) => void;
+    const p = new Promise<Resolution>((r) => { resolveFn = r; });
+    const awaited = awaitWithDefault(intent, p, authority);
+    // Resolve the veto WHILE in-window, then step the clock past the deadline before the
+    // guarded .then microtask observes it — the exact boundary that used to flip NO→YES.
+    resolveFn(veto);
+    vi.setSystemTime(new Date("2026-06-01T00:05:01.000Z"));
+    const r = await awaited;
+    expect(r.decision).toBe("reject"); // the human's veto stands — never converted to approve
+    expect(r.policy).toBe("approver"); // and it's the human decision, not a timeout Default
+  });
+
+  it("still honors a genuine timeout Default when nobody decides (default=approve)", async () => {
+    vi.setSystemTime(new Date("2026-06-01T00:00:00.000Z"));
+    const intent = intentWith(60, "approve");
+    const pending = awaitWithDefault(intent, never, authority);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const r = await pending;
+    expect(r.decision).toBe("approve"); // silence → the declared Default, unchanged
+    expect(r.policy).toBe("default");
+  });
+});
+
 describe("resolution validation at the race boundary", () => {
   it("rejects a resolution whose receipt is for a different intent", async () => {
     const intent = intentWith(60, "reject");

@@ -50,10 +50,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
   recorded passkey timestamp to the intent deadline (no post-dating a decision past a short
   window) without a cross-clock-domain comparison that would false-reject a genuine
   multi-host approval.
+- **A human veto can no longer be flipped to an approve Default at the deadline boundary.**
+  `awaitWithDefault` discards a decision *observed* at/after the deadline in favor of the
+  Default (a stale/overdue adapter must not beat the timeout). Because the observation runs
+  in a promise microtask, a `reject` recorded in-window (record()/settle() gate on the
+  clock, so it was in time) whose reaction ran a microtask later was being discarded — and
+  for `default:"approve"` (quorum 1) that meant `mintDefault` returned **approve**, turning
+  a human's NO into a YES. The past-deadline branch now never lets an approve Default
+  override a reject: a reject-shaped resolution is honored and still adjudicated by
+  `verifyResolution` (a genuine listed-approver veto passes; a forged/unlisted/contradictory
+  one fails closed). Trade-off, by design: a genuinely post-deadline veto from a *custom*
+  adapter may now deny an action whose Default would have approved — an availability/finality
+  choice, never an unauthorized execution. Found by adversarial review, confirmed by a
+  second engine, and locked by a red-first fake-timer test.
 - Hardening surfaced by a convergence review loop (second-engine review + workflow code
-  review + adversarial review, driven to zero findings), each fix locked by a red-first
-  regression test and re-validated by the browser + WebAuthn human-simulation harness.
-  359 tests.
+  review + adversarial review), each fix locked by a red-first regression test and
+  re-validated by the browser + WebAuthn human-simulation harness. 361 tests.
 
 ## [0.2.0] — 2026-07-17
 

@@ -149,9 +149,12 @@ export class PolicyLog implements PolicyStore {
         if (changeOrg(e.change) !== genesisOrg) return false; // single-org invariant
         // Fold this entry into the running admin set for the NEXT iteration's check.
         const c = e.change;
-        if (c.kind === "admin-add") admins.set(c.public_key, { org: c.org, public_key: c.public_key, name: c.name });
-        else if (c.kind === "admin-revoke") {
-          if (admins.size <= 1) return false; // last-admin invariant must hold historically too
+        if (c.kind === "admin-add") {
+          if (i > 0 && admins.has(c.public_key)) return false; // duplicate admin-add — impossible via append()
+          admins.set(c.public_key, { org: c.org, public_key: c.public_key, name: c.name });
+        } else if (c.kind === "admin-revoke") {
+          if (!admins.has(c.public_key)) return false; // revoke of a never-active key — impossible via append()
+          if (admins.size <= 1) return false;            // last-admin invariant (already present)
           admins.delete(c.public_key);
         }
         prevHash = hashEntry(e);

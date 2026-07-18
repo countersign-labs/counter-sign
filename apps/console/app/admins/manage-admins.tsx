@@ -3,14 +3,21 @@
 // remaining admin cannot be revoked (enforced by the library — the attempt is rejected).
 import { useState } from "react";
 import { useSigner, AdminKeyField, Result } from "../sign";
-import type { PolicyChange } from "../../lib/policy-entry";
+import { browserKeypair, type PolicyChange } from "../../lib/policy-entry";
 
 export function ManageAdmins({ org, admins }: { org: string; admins: { public_key: string; name?: string }[] }) {
   const [mode, setMode] = useState<"add" | "revoke">("add");
   const [newName, setNewName] = useState("");
   const [newKey, setNewKey] = useState("");
+  const [genSecret, setGenSecret] = useState("");
   const [revokeKey, setRevokeKey] = useState("");
   const s = useSigner();
+
+  async function generate() {
+    const kp = await browserKeypair();
+    setNewKey(kp.publicKey);
+    setGenSecret(kp.secret);
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,7 +48,25 @@ export function ManageAdmins({ org, admins }: { org: string; admins: { public_ke
         {mode === "add" ? (
           <>
             <label style={label}>New admin name (optional)<input style={field} value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="ops-lead" /></label>
-            <label style={label}>New admin PUBLIC key<input style={field} value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="base64url ed25519 public key" required /></label>
+            <label style={label}>
+              New admin&rsquo;s PUBLIC key
+              <span className="muted"> — paste the new admin&rsquo;s public key, or generate a fresh keypair here.</span>
+            </label>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start", maxWidth: "34rem" }}>
+              <input style={{ ...field, flex: 1, margin: 0 }} value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="base64url ed25519 public key" required />
+              <button type="button" onClick={generate} style={{ background: "transparent", color: "var(--sage)", border: "1px solid var(--line)", whiteSpace: "nowrap" }}>
+                Generate keypair
+              </button>
+            </div>
+            {genSecret && (
+              <div style={{ marginTop: "0.6rem", padding: "0.75rem", border: "1px solid rgba(208,128,90,0.4)", borderRadius: "6px", background: "rgba(208,128,90,0.08)", maxWidth: "34rem" }}>
+                <div className="bad" style={{ fontSize: "0.85rem", fontWeight: 600 }}>Save this now — it is shown once.</div>
+                <div className="muted" style={{ fontSize: "0.82rem", margin: "0.25rem 0" }}>
+                  This is the new admin&rsquo;s <strong>private key</strong>. Give it to them over a secure channel — they use it to sign. It is not stored anywhere.
+                </div>
+                <code className="mono" style={{ wordBreak: "break-all", color: "var(--ink)" }}>{genSecret}</code>
+              </div>
+            )}
           </>
         ) : (
           <>

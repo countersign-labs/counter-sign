@@ -5,12 +5,20 @@
 // the load-bearing interop guarantee for the console's client-side write path.
 import { describe, expect, it } from "vitest";
 import { PolicyLog, generateKeypair } from "@countersignlabs/counter-sign";
-import { signPolicyEntry, publicKeyOf } from "./policy-entry";
+import { signPolicyEntry, publicKeyOf, browserKeypair } from "./policy-entry";
 
 describe("browser-signed policy entries interoperate with the library", () => {
   it("derives the same public key format as the library", async () => {
     const kp = generateKeypair();
     expect(await publicKeyOf(kp.secretKey)).toBe(kp.publicKey);
+  });
+
+  it("browserKeypair produces a library-compatible, self-consistent keypair", async () => {
+    const kp = await browserKeypair();
+    expect(await publicKeyOf(kp.secret)).toBe(kp.publicKey); // public matches secret
+    // a genesis admin-add signed by that fresh seed verifies through the real library
+    const genesis = await signPolicyEntry({ kind: "admin-add", org: "o", public_key: kp.publicKey }, { length: 0, hash: "" }, kp.secret);
+    expect(new PolicyLog([genesis as never]).verifyChain()).toBe(true);
   });
 
   it("a browser-signed genesis admin-add passes verifyChain", async () => {

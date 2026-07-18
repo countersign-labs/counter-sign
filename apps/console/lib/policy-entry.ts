@@ -74,6 +74,15 @@ export async function publicKeyOf(adminSeedB64url: string): Promise<string> {
   return toB64url(await ed.getPublicKeyAsync(fromB64url(adminSeedB64url)));
 }
 
+/** Generate a fresh ed25519 keypair in the browser (library-compatible base64url format).
+ *  `secret` is the private seed (keep it safe); `publicKey` is what gets enrolled/added. */
+export async function browserKeypair(): Promise<{ secret: string; publicKey: string }> {
+  const seed = new Uint8Array(32);
+  crypto.getRandomValues(seed);
+  const pub = await ed.getPublicKeyAsync(seed);
+  return { secret: toB64url(seed), publicKey: toB64url(pub) };
+}
+
 /**
  * Build and sign a policy-log entry client-side. `head` is the current log head
  * (`{ length, hash }` from PolicyLog.head()); `issuedAt` defaults to now (pass a fixed

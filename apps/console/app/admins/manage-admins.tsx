@@ -9,14 +9,17 @@ export function ManageAdmins({ org, admins }: { org: string; admins: { public_ke
   const [mode, setMode] = useState<"add" | "revoke">("add");
   const [newName, setNewName] = useState("");
   const [newKey, setNewKey] = useState("");
-  const [genSecret, setGenSecret] = useState("");
+  // The generated keypair, kept atomically: the secret is shown ONLY while the key field still
+  // holds exactly this public key. Editing or replacing the key hides the now-mismatched secret,
+  // so we never label pair A's private key as belonging to a submission that enrolls key B.
+  const [gen, setGen] = useState<{ pub: string; secret: string } | null>(null);
   const [revokeKey, setRevokeKey] = useState("");
   const s = useSigner();
 
   async function generate() {
     const kp = await browserKeypair();
     setNewKey(kp.publicKey);
-    setGenSecret(kp.secret);
+    setGen({ pub: kp.publicKey, secret: kp.secret });
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -29,7 +32,17 @@ export function ManageAdmins({ org, admins }: { org: string; admins: { public_ke
     if (ok && mode === "add") {
       setNewName("");
       setNewKey("");
+      setGen(null); // the freshly generated private key is "shown once" — clear it after use
     }
+  }
+
+  function switchMode(next: "add" | "revoke") {
+    setMode(next);
+    // Clear a GENERATED public key together with its secret (leaving it behind would let a key be
+    // enrolled with no one holding the secret). A manually pasted key has no such coupling — keep
+    // it so a mode toggle doesn't force the admin to re-paste.
+    if (gen && newKey.trim() === gen.pub) setNewKey("");
+    setGen(null);
   }
 
   return (
@@ -40,8 +53,8 @@ export function ManageAdmins({ org, admins }: { org: string; admins: { public_ke
         already hold — it never leaves your browser. The last remaining admin cannot be revoked.
       </p>
       <div style={{ display: "flex", gap: "1rem", margin: "0.5rem 0" }}>
-        <label style={{ color: "var(--ink)" }}><input type="radio" checked={mode === "add"} onChange={() => setMode("add")} /> Add an admin</label>
-        <label style={{ color: "var(--ink)" }}><input type="radio" checked={mode === "revoke"} onChange={() => setMode("revoke")} /> Revoke an admin</label>
+        <label style={{ color: "var(--ink)" }}><input type="radio" checked={mode === "add"} onChange={() => switchMode("add")} /> Add an admin</label>
+        <label style={{ color: "var(--ink)" }}><input type="radio" checked={mode === "revoke"} onChange={() => switchMode("revoke")} /> Revoke an admin</label>
       </div>
 
       <form onSubmit={onSubmit}>
@@ -58,13 +71,13 @@ export function ManageAdmins({ org, admins }: { org: string; admins: { public_ke
                 Generate keypair
               </button>
             </div>
-            {genSecret && (
+            {gen && newKey.trim() === gen.pub && (
               <div style={{ marginTop: "0.6rem", padding: "0.75rem", border: "1px solid rgba(208,128,90,0.4)", borderRadius: "6px", background: "rgba(208,128,90,0.08)", maxWidth: "34rem" }}>
                 <div className="bad" style={{ fontSize: "0.85rem", fontWeight: 600 }}>Save this now — it is shown once.</div>
                 <div className="muted" style={{ fontSize: "0.82rem", margin: "0.25rem 0" }}>
-                  This is the new admin&rsquo;s <strong>private key</strong>. Give it to them over a secure channel — they use it to sign. It is not stored anywhere.
+                  This is the private key for the public key above. Give it to the new admin over a secure channel — they use it to sign. It is not stored anywhere.
                 </div>
-                <code className="mono" style={{ wordBreak: "break-all", color: "var(--ink)" }}>{genSecret}</code>
+                <code className="mono" style={{ wordBreak: "break-all", color: "var(--ink)" }}>{gen.secret}</code>
               </div>
             )}
           </>

@@ -1,21 +1,50 @@
 {
   "name": "@countersignlabs/console",
-  "private": true,
+  "version": "0.2.0",
+  "description": "Local admin console for the counter-sign policy layer — run your org's signed policy log on your own machine: manage admins, roles, rules, approvers, and audit. `npx @countersignlabs/console`.",
+  "license": "Apache-2.0",
+  "author": "Haridarman Kumaresan",
   "type": "module",
+  "bin": {
+    "countersign-console": "bin/console.mjs"
+  },
+  "files": [
+    ".next/standalone",
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/countersign-labs/counter-sign.git",
+    "directory": "apps/console"
+  },
+  "homepage": "https://countersignlabs.com",
+  "keywords": [
+    "counter-sign",
+    "agent-authorization",
+    "policy",
+    "admin-console",
+    "ed25519",
+    "self-hosted"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:cli": "next build && node scripts/postbuild.mjs",
+    "prepack": "npm run build:cli",
     "start": "next start",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@countersignlabs/counter-sign": "file:../..",
+  "dependencies": {},
+  "devDependencies": {
+    "@countersignlabs/counter-sign": "^0.2.0",
     "@noble/ed25519": "^2.3.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  },
-  "devDependencies": {
+    "react-dom": "^19.0.0",
     "@types/node": "^26.1.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

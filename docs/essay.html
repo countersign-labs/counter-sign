@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Who says yes? · counter-sign</title>
+<meta name="description" content="Agents can act. We never agreed on how they get permission — provably, from the right people, on the record. An essay on counter-sign, the open protocol for agent-to-human authorization.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="canonical" href="https://countersignlabs.com/essay">
+<meta property="og:title" content="Who says yes? — an essay on agent-to-human authorization">
+<meta property="og:description" content="Agents can act. We never agreed on how they get permission — provably, from the right people, on the record.">
+<meta property="og:image" content="https://countersignlabs.com/brag-poster.png">
+<meta property="og:url" content="https://countersignlabs.com/essay">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Who says yes? — an essay on agent-to-human authorization">
+<meta name="twitter:description" content="Agents can act. We never agreed on how they get permission — provably, from the right people, on the record.">
+<meta name="twitter:image" content="https://countersignlabs.com/brag-poster.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b110d; --bg-2:#101913; --panel:#0f1711;
+    --ink:#eef3ea; --dim:#9db29a; --dimmer:#6f8570;
+    --sage:#a6c99c; --moss:#7c9e76; --forest:#46683f; --rust:#d0805a;
+    --line:rgba(166,201,156,.15); --line-soft:rgba(166,201,156,.09);
+    --mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+    --display:'Space Grotesk',system-ui,sans-serif;
+    --body:'Inter',system-ui,sans-serif;
+    --maxw:960px; --readw:720px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    background:var(--bg);color:var(--ink);font-family:var(--body);
+    font-weight:400;line-height:1.7;font-size:18px;-webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(1100px 620px at 78% -8%,rgba(70,104,63,.28),transparent 62%),
+      radial-gradient(760px 520px at 6% 4%,rgba(124,158,118,.12),transparent 60%);
+    background-attachment:fixed;
+  }
+  ::selection{background:var(--sage);color:var(--bg);}
+  a{color:inherit;}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px;}
+  .read{max-width:var(--readw);margin:0 auto;padding:0 24px;}
+
+  /* sticky header — matches the landing page */
+  header{position:sticky;top:0;z-index:40;backdrop-filter:blur(12px);background:rgba(11,17,13,.72);border-bottom:1px solid var(--line-soft);}
+  .nav{max-width:var(--maxw);margin:0 auto;padding:12px 24px;display:flex;align-items:center;gap:22px;}
+  .brand{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-weight:700;font-size:14px;letter-spacing:.02em;color:var(--ink);text-decoration:none;}
+  .brand img{width:22px;height:22px;}
+  .nav .links{margin-left:auto;display:flex;gap:22px;align-items:center;}
+  .nav .links a{font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;color:var(--dim);text-decoration:none;transition:color .15s;}
+  .nav .links a:hover{color:var(--sage);}
+  .btn{font-family:var(--mono);font-weight:500;font-size:13px;letter-spacing:.02em;text-decoration:none;padding:9px 16px;border-radius:6px;border:1px solid var(--line);color:var(--ink);transition:all .15s ease;white-space:nowrap;display:inline-block;}
+  .btn:hover{border-color:var(--sage);background:rgba(166,201,156,.08);transform:translateY(-1px);}
+  .btn.solid{background:var(--sage);color:var(--bg);border-color:var(--sage);font-weight:600;}
+  .btn.solid:hover{background:#b9d6b0;}
+  @media(max-width:720px){.nav .links a:not(.btn){display:none;}}
+
+  /* article */
+  article{padding:70px 0 40px;}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--moss);margin-bottom:22px;display:flex;align-items:center;gap:10px;}
+  .eyebrow::before{content:"";width:22px;height:1px;background:var(--moss);opacity:.7;}
+  h1{font-family:var(--display);font-weight:700;font-size:clamp(38px,6vw,64px);line-height:1.02;letter-spacing:-.03em;margin-bottom:24px;}
+  .sub{font-family:var(--display);font-weight:500;font-size:clamp(19px,2.4vw,24px);line-height:1.34;color:var(--dim);letter-spacing:-.01em;max-width:34ch;}
+  .byline{font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--dimmer);margin-top:30px;padding-bottom:34px;border-bottom:1px solid var(--line);}
+  .byline b{color:var(--dim);font-weight:500;}
+
+  .body{margin-top:44px;}
+  .body h2{font-family:var(--display);font-weight:600;font-size:clamp(24px,3.4vw,32px);line-height:1.12;letter-spacing:-.015em;margin:52px 0 18px;}
+  .body h2 .g{color:var(--sage);}
+  .body p{color:var(--ink);margin-bottom:18px;}
+  .body p.lead{font-size:20px;color:var(--dim);}
+  .body strong{font-weight:600;color:var(--ink);}
+  .body em{font-style:italic;color:var(--sage);}
+  .body code{font-family:var(--mono);font-size:.84em;background:rgba(166,201,156,.10);border:1px solid var(--line-soft);padding:.08em .38em;border-radius:4px;color:var(--sage);}
+  .body a.inline{color:var(--sage);text-decoration:none;border-bottom:1px solid var(--line);}
+  .body a.inline:hover{border-color:var(--sage);}
+
+  .code{margin:30px 0;background:#0a0f0b;border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  .code .bar{display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--dimmer);text-transform:uppercase;}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--forest);}
+  .dot:nth-child(2){background:var(--moss);}.dot:nth-child(3){background:var(--sage);}
+  .code pre{padding:20px;overflow-x:auto;font-family:var(--mono);font-size:14px;line-height:1.8;color:var(--sage);}
+  .code pre .cm{color:var(--dimmer);}
+
+  .pull{font-family:var(--display);font-weight:600;font-size:clamp(24px,3.6vw,34px);line-height:1.28;letter-spacing:-.015em;margin:60px 0 10px;padding-top:44px;border-top:1px solid var(--line);}
+  .pull .a{color:var(--sage);}
+
+  .backcta{display:flex;gap:14px;flex-wrap:wrap;margin:48px 0 0;}
+  .backcta .btn{padding:13px 22px;font-size:14px;}
+
+  footer{padding:44px 0 56px;border-top:1px solid var(--line-soft);margin-top:70px;}
+  footer .frow{display:flex;flex-wrap:wrap;gap:22px;align-items:center;font-family:var(--mono);font-size:12.5px;}
+  footer a{color:var(--dim);text-decoration:none;letter-spacing:.02em;}
+  footer a:hover{color:var(--sage);}
+  footer .fine{margin-top:20px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--dimmer);line-height:1.9;}
+
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.001s!important;}}
+</style>
+</head>
+<body>
+
+<header>
+  <nav class="nav">
+    <a class="brand" href="/"><img src="favicon.svg" alt=""> counter-sign</a>
+    <div class="links">
+      <a href="/">Home</a>
+      <a href="/#nouns">The spec</a>
+      <a href="/#demo">Try it</a>
+      <a href="https://github.com/countersign-labs/counter-sign/blob/main/spec/countersign-spec.md">Spec ↗</a>
+      <a class="btn" href="https://github.com/countersign-labs/counter-sign">GitHub ↗</a>
+    </div>
+  </nav>
+</header>
+
+<article>
+  <div class="read">
+    <div class="eyebrow">Essay</div>
+    <h1>Who says yes?</h1>
+    <p class="sub">Agents can act. We never agreed on how they get permission — provably, from the right people, on the record. That's counter-sign.</p>
+    <div class="byline">By <b>Haridarman Kumaresan</b> · 20 July 2026 · ~6 min read</div>
+
+    <div class="body">
+      <p class="lead">Picture the moment. An autonomous agent, mid-task, resolves a step that reads: <code>billing.wire — $42,000 → vendor</code>. Everything before this point was reasoning and retrieval. This step moves money. And in almost every agent system shipping today, the honest answer to <em>"what happens next?"</em> is: it depends on whatever glue the builder happened to wire up that afternoon.</p>
+
+      <p>Maybe a message lands in a Slack channel with an Approve button. Maybe a webhook flips a boolean. Maybe — often — the agent just does it, because the demo needed to look autonomous. None of those approvals are verifiable after the fact. None of them survive an audit. And most of them can be manufactured by the very service that's asking the question.</p>
+
+      <p>We have spent the last two years standardising almost everything else about agents. <strong>MCP</strong> gave them a common way to reach tools. <strong>A2A</strong> gave them a common way to reach each other. But the oldest question in any system that can do something consequential — <em>who authorized this, and can you prove it later?</em> — is still improvised, per project, every time.</p>
+
+      <p>counter-sign is my attempt to give that question a real answer.</p>
+
+      <h2>Proposing is not authorizing</h2>
+      <p>The core move is almost boringly simple, and everything else follows from it: <strong>separate the act of proposing an action from the act of authorizing it.</strong></p>
+      <p>An agent should be able to <em>ask</em> with full precision, and be completely unable to <em>grant</em>. A human (or a quorum of humans) should be the only party that can turn a proposal into authority — and that grant should be a cryptographic fact, not a UI event.</p>
+      <p>So counter-sign has two verbs.</p>
+      <p>First, the agent signs an <strong>Intent</strong>. This is a canonical-JSON envelope that pins down exactly what is being requested — the action, the amount, a risk tier, the number of approvals required, and a default to fall back to if nobody responds (usually <code>reject</code>). The agent signs it with its own ed25519 key over domain-separated bytes. Crucially, the Intent is a <em>request</em>. It carries no authority on its own. It is the agent saying, on the record, "here is precisely what I want to do."</p>
+      <p>Second, the required humans <strong>countersign</strong> it into authority. Each approver signs their own receipt with their own key. When two people approve, you get two independent signatures from two independently-held keys — and the moment those meet the quorum the Intent demanded, the action is authorized.</p>
+      <p>That's the whole shape: an agent signs its intent; a human countersigns it into authority.</p>
+
+      <h2>Why the keys matter <span class="g">more than the buttons</span></h2>
+      <p>The interesting engineering is in that second verb, and specifically in what happens when <code>quorum &gt; 1</code>.</p>
+      <p>A naive "four-eyes" system lets one authority service vouch that N people clicked approve. But that just relocates the trust: whoever controls that service controls the approvals. If it's compromised, it can invent a quorum out of thin air, or approve on a user's behalf, and the receipt will look identical to an honest one.</p>
+      <p>counter-sign makes multi-party approval <strong>cryptographic separation of duty</strong> instead. For a quorum, every approver signs their own receipt with a key the service never holds. Each approver's key is bound in the agent-signed Intent, so an approver's key can't be quietly swapped. A party in possession of the authority key — the key that runs the flow — can neither forge the quorum nor stand in for an approver. The compromise of the coordinating server stops being game over.</p>
+      <p>Humans sign with <strong>passkeys / WebAuthn</strong>, which matters more than it sounds. It means there is no fresh secret to distribute, rotate, or leak: the approver uses the same platform authenticator they already trust to unlock their laptop or phone. The private key never leaves their device, and it never touches the server.</p>
+
+      <h2>The artifact that <span class="g">survives the audit</span></h2>
+      <p>Every decision — approve, veto, or a timeout falling back to the signed default — produces a <strong>receipt</strong>. Receipts are hash-chained into a tamper-evident, append-only log: change one entry and every entry after it stops verifying. And the whole thing <strong>verifies offline</strong>. Hand someone the receipts and the relevant public keys and they can confirm, months later and with no access to your systems, that this action was authorized, by these parties, under this quorum, at this point in the chain.</p>
+      <p>That is the deliverable that most "approval" systems never produce. A green checkmark in a dashboard is not evidence. A signed, chained, offline-verifiable receipt is.</p>
+      <p>Key bindings themselves come from an <strong>enrollment registry</strong> — an org-root-attested, append-only log that anchors each <code>actor → key</code> mapping, signed by an org-root key that is deliberately distinct from the runtime authority, with proof-of-possession required for every key (a raw-ed25519 self-signature, or a WebAuthn assertion for a passkey), plus revocation. It's the part that lets a verifier trust <em>whose</em> key they're looking at.</p>
+
+      <h2>A protocol, <span class="g">not a product</span></h2>
+      <p>counter-sign is an open protocol with a reference implementation, not a service you sign up for. That distinction is the point. If "who says yes" is going to be answerable across different agent frameworks and vendors, it has to be a spec that anyone can implement — and a spec is only real if independent implementations agree byte-for-byte.</p>
+      <p>So the repository ships <strong>conformance test vectors</strong>: a deterministic, language-neutral fixture set covering canonical-JSON known-answers, key derivation, signature vectors, signed Intents, keyed / vouched / timeout-default receipts, the accept <em>and</em> reject cases for resolution, and the receipt-log chain head. A second implementation in any language can check itself against them. Interop is provable, not assumed.</p>
+      <p>Everything runs locally. The library is on npm, and there's a single-org admin console you launch with one command — it holds no signing key of its own; your admin key signs each policy change client-side, in the browser, and the server only validates and stores.</p>
+      <div class="code">
+        <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> install</div>
+<pre>npm i @countersignlabs/counter-sign     <span class="cm"># the protocol library</span>
+npx @countersignlabs/console            <span class="cm"># a local admin console for your org</span></pre>
+      </div>
+      <p>Code is Apache-2.0. The specification text is CC BY 4.0. Delivery adapters exist for the channels people actually approve from — Telegram, Discord, Slack, WhatsApp, email — so the human side can meet people where they are.</p>
+
+      <h2>Where it is, <span class="g">honestly</span></h2>
+      <p>This is <strong>v0.2.0</strong>, and I'd rather be precise than promotional about its state.</p>
+      <p>v0.2 deliberately broke the v0.1 wire format. The old integrity-only receipts predate per-approver keys and were forgeable by a compromised authority server, so a v0.2 verifier refuses them — loudly, never silently. If you have v0.1 archives, audit them with a v0.1 install. The passkey <em>delivery and collection</em> glue is marked experimental while I settle its shape; the raw-ed25519 approval path is the stable one to build on today. The keyed-quorum path has been through repeated adversarial review rounds and a browser + WebAuthn simulation harness exercising approve / veto / timeout / wrong-key end to end.</p>
+      <p>If you build anything that lets an agent take a consequential action, I'd value your eyes on the threat model — especially the compromised-authority-server case — before the wire format freezes. The spec is in <a class="inline" href="https://github.com/countersign-labs/counter-sign/tree/main/spec">/spec</a>, the vectors in <a class="inline" href="https://github.com/countersign-labs/counter-sign/tree/main/vectors">/vectors</a>, and the whole thing is open at <a class="inline" href="https://github.com/countersign-labs/counter-sign">github.com/countersign-labs/counter-sign</a>.</p>
+
+      <p class="pull">MCP gave agents tools. A2A gave agents colleagues. <span class="a">counter-sign gives agents a boss.</span></p>
+
+      <div class="backcta">
+        <a class="btn solid" href="https://github.com/countersign-labs/counter-sign">View on GitHub ↗</a>
+        <a class="btn" href="/">Back to home</a>
+      </div>
+    </div>
+  </div>
+</article>
+
+<footer>
+  <div class="wrap">
+    <div class="frow">
+      <a href="/">Home</a>
+      <a href="https://github.com/countersign-labs/counter-sign">GitHub ↗</a>
+      <a href="https://github.com/countersign-labs/counter-sign/blob/main/spec/countersign-spec.md">Spec ↗</a>
+      <a href="https://github.com/countersign-labs/counter-sign/blob/main/CHANGELOG.md">Changelog ↗</a>
+      <a href="https://github.com/countersign-labs/counter-sign/security/policy">Security ↗</a>
+    </div>
+    <div class="fine">counter-sign · v0.2.0 · spec author Haridarman Kumaresan · Code Apache-2.0 · Spec text CC BY 4.0.</div>
+  </div>
+</footer>
+
+</body>
+</html>

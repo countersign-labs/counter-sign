@@ -232,11 +232,21 @@ organizations are what pass audits. See [COMPLIANCE.md](COMPLIANCE.md) for how
 a Countersignature maps to control areas in SOC 2, ISO/IEC 27001, the NIST AI
 RMF, and EU AI Act Article 14.
 
+## Admin console
+
+Manage an org's policy — admin keys, roles, rules, and approver enrollments — and read the audit trail in a **local** console you run yourself:
+
+```sh
+npx @countersignlabs/console --data-dir ./my-org --open
+```
+
+It's single-org and self-hosted: it reads and writes only the data directory you point it at, has no login (the only authority is holding an admin key), and the admin's signing key never leaves the browser — each policy change is signed client-side and validated server-side against `verifyChain` plus a fail-closed semantic gate. Source: [`apps/console`](apps/console).
+
 ## Repository layout
 
 | Path | What |
 | ---- | ---- |
-| `spec/` | The protocol specification (v0.1) |
+| `spec/` | The protocol specification |
 | `schemas/` | JSON Schema (draft 2020-12) for Intent and Countersignature |
 | `src/` | Reference implementation: core, shim, adapters (TypeScript, Node 20+, ESM) |
 | `examples/` | One runnable demo per adapter + offline local/email demos |

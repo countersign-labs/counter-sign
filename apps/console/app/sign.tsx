@@ -28,8 +28,12 @@ export function useSigner(): Signer {
     try {
       const entry = await signPolicyEntry(change, await getHead(), seed.trim());
       const res = await submitEntry(entry);
-      if (res.ok) setMsg({ ok: true, text: okText });
-      else setMsg({ ok: false, text: res.error });
+      if (res.ok) {
+        setMsg({ ok: true, text: okText });
+        setSeed(""); // clear the admin seed after a successful signature — don't leave the org root key resident in the page
+      } else {
+        setMsg({ ok: false, text: res.error });
+      }
       return res.ok;
     } catch (err) {
       setMsg({ ok: false, text: `Signing failed: ${err instanceof Error ? err.message : String(err)}` });

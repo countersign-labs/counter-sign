@@ -123,7 +123,7 @@
     <div class="eyebrow">Essay</div>
     <h1>Who says yes?</h1>
     <p class="sub">Agents can act. We never agreed on how they get permission — provably, from the right people, on the record. That's counter-sign.</p>
-    <div class="byline">By <b>Haridarman Kumaresan</b> · 20 July 2026 · ~6 min read</div>
+    <div class="byline">By <b>Disco Darman</b> a.k.a. <b>Haridarman K</b> · 20 July 2026 · ~6 min read</div>
 
     <div class="body">
       <p class="lead">Picture the moment. An autonomous agent, mid-task, resolves a step that reads: <code>billing.wire — $42,000 → vendor</code>. Everything before this point was reasoning and retrieval. This step moves money. And in almost every agent system shipping today, the honest answer to <em>"what happens next?"</em> is: it depends on whatever glue the builder happened to wire up that afternoon.</p>
@@ -163,6 +163,11 @@
 npx @countersignlabs/console            <span class="cm"># a local admin console for your org</span></pre>
       </div>
       <p>Code is Apache-2.0. The specification text is CC BY 4.0. Delivery adapters exist for the channels people actually approve from — Telegram, Discord, Slack, WhatsApp, email — so the human side can meet people where they are.</p>
+
+      <h2>One rail of <span class="g">many that will be needed</span></h2>
+      <p>counter-sign is deliberately narrow: agent-to-human authorization, and nothing else. But the shape it takes — <em>cryptographic, human-named, mandate-scoped, non-repudiable</em> — is the shape every emerging technology has eventually needed to reach regulated adoption. Aviation had flight plans and tail numbers. Payments had PCI-DSS and tokenization. Commercial drones needed Part 107. None of these made the underlying technology safer in the physics sense; they made it <em>accountable</em>, and only then did regulators sign off, insurers underwrite, and the market scale.</p>
+      <p>Autonomous agents are at the moment right before their accountability layer exists. I've been calling the general class of it <strong>Agent Accountability Rails (AAR)</strong>: cryptographic, human-named, mandate-scoped accountability infrastructure for autonomous agents. counter-sign is one such rail — the authorization one. Others will follow: credential-issuance lifecycle, delegated-mandate transport across service boundaries, provider-side receipt verification. Each is a distinct spec; each is one component of the same category.</p>
+      <p>The point of naming the category is that no single vendor should own it. The next twelve months of enterprise AI adoption will be gated by whether these rails exist as neutral, open standards or as proprietary lock-in. That's a choice the industry gets to make once, and the wrong choice is very hard to reverse.</p>
 
       <h2>Where it is, <span class="g">honestly</span></h2>
       <p>This is <strong>v0.2.0</strong>, and I'd rather be precise than promotional about its state.</p>

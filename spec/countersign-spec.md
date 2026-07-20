@@ -16,6 +16,14 @@ with exactly four nouns: an **Intent** (what the agent wants to do), a
 signed, portable receipt of the decision), and a **Default** (what silence
 means). Nothing else is specified on purpose.
 
+counter-sign is the first proposed component of a broader category the
+authors call **Agent Accountability Rails (AAR)** — cryptographic,
+human-named, mandate-scoped accountability infrastructure for autonomous
+agents. Other rails address adjacent surfaces (credential-issuance
+lifecycle, delegated-mandate transport across services, provider-side
+receipt verification). This document specifies exactly one rail: the
+agent-to-human authorization step.
+
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY are to be
 interpreted as described in RFC 2119.
 

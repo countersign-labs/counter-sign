@@ -4,6 +4,10 @@
 
 **MCP gave agents tools. A2A gave agents colleagues. counter-sign gives agents a boss.**
 
+[![npm](https://img.shields.io/npm/v/@countersignlabs/counter-sign?label=npm&color=3f7a4c)](https://www.npmjs.com/package/@countersignlabs/counter-sign)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-3f7a4c)](LICENSE)
+[![IETF Internet-Draft](https://img.shields.io/badge/IETF-Internet--Draft-3f7a4c)](https://datatracker.ietf.org/doc/draft-kumaresan-counter-sign/)
+
 **[countersignlabs.com](https://countersignlabs.com)** · [Spec](spec/countersign-spec.md) · [IETF Draft](https://datatracker.ietf.org/doc/draft-kumaresan-counter-sign/) · [Releases](https://github.com/countersign-labs/counter-sign/releases)
 
 [![counter-sign in motion — an autonomous agent's $42,000 action is gated, a human taps Approve, and a signed portable receipt is produced.](assets/countersign-brag.gif)](assets/countersign-brag.mp4)

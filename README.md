@@ -4,7 +4,7 @@
 
 **MCP gave agents tools. A2A gave agents colleagues. counter-sign gives agents a boss.**
 
-**[countersignlabs.com](https://countersignlabs.com)** · [Spec](spec/countersign-spec.md) · [Releases](https://github.com/countersign-labs/counter-sign/releases)
+**[countersignlabs.com](https://countersignlabs.com)** · [Spec](spec/countersign-spec.md) · [IETF Draft](https://datatracker.ietf.org/doc/draft-kumaresan-counter-sign/) · [Releases](https://github.com/countersign-labs/counter-sign/releases)
 
 [![counter-sign in motion — an autonomous agent's $42,000 action is gated, a human taps Approve, and a signed portable receipt is produced.](assets/countersign-brag.gif)](assets/countersign-brag.mp4)
 
@@ -28,6 +28,8 @@ nothing else:
 - **Default** — declared timeout behavior. Silence is never ambiguous.
 
 Read the spec: [spec/countersign-spec.md](spec/countersign-spec.md) (~3 pages).
+Also filed as an IETF Internet-Draft:
+[`draft-kumaresan-counter-sign-00`](https://datatracker.ietf.org/doc/draft-kumaresan-counter-sign/).
 
 ## Quickstart
 

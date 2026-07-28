@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "countersign"
+version = "0.2.0"
+description = "Python client for counter-sign — the open protocol for agent-to-human authorization."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Haridarman Kumaresan" }]
+keywords = ["counter-sign", "authorization", "ai-agents", "ed25519", "quorum", "webauthn"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Security :: Cryptography",
+]
+dependencies = ["cryptography>=41"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://countersignlabs.com"
+Repository = "https://github.com/countersign-labs/counter-sign"
+"Internet-Draft" = "https://datatracker.ietf.org/doc/draft-kumaresan-counter-sign/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["countersign"]

@@ -13,3 +13,9 @@ dist/
 # Launch/marketing working directory (video composition source + drafts).
 # The rendered deliverables are committed under assets/ and docs/.
 brag-output/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

@@ -26,3 +26,15 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+
+  python-client:
+    runs-on: ubuntu-latest
+    name: python client (conformance vectors)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install cryptography pytest
+      - run: pytest -q
+        working-directory: clients/python

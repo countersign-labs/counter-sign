@@ -10,7 +10,8 @@ import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { wrapAction } from "../src/shim.js";
 import { PendingDecisions } from "../src/adapter.js";
 import { ReceiptLog } from "../src/receipt-log.js";
 import { canonicalize } from "../src/core/canonical.js";
@@ -112,6 +113,29 @@ describe("passkey receipts verify through the keyed choke point", () => {
     // Re-point the receipt at i2 — its assertion challenge no longer matches i2's digest.
     const replayed = { ...receipt, intent_id: i2.intent_id };
     expect(() => verifyResolution(i2, res("approve", [replayed]), authPub, policy)).toThrow(InvalidCountersignatureError);
+  });
+
+  it("does not run a second guarded deployment with the first deployment's passkey receipt", async () => {
+    const cred = p256Credential();
+    const actor = "m:release";
+    let firstApproval: Resolution | undefined;
+    const deploy = vi.fn();
+    const guard = wrapAction(deploy, {
+      action: "deploy.staging", summary: "Deploy the staging release", risk_tier: "high",
+      approvers: [keyedApprover(actor, cred.credential)], timeout: 60, default: "reject",
+    }, {
+      channel: "test",
+      async deliver() {},
+      async awaitResolution(intent) {
+        // Simulate a stale adapter returning the previous approval on retry.
+        firstApproval ??= res("approve", [passkeyReceipt(intent, "approve", actor, cred)]);
+        return firstApproval;
+      },
+    }, { agent, authorityKey: authority.secretKey, webauthn: { ...policy, requireUserVerification: true } });
+
+    await guard();
+    await expect(guard()).rejects.toThrow(InvalidCountersignatureError);
+    expect(deploy).toHaveBeenCalledTimes(1);
   });
 
   it("a mixed keyed quorum (raw-ed25519 + passkey) verifies", () => {

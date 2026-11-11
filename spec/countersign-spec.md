@@ -2,7 +2,6 @@
 
 **Version:** 0.2 (draft)
 **Author:** Haridarman Kumaresan
-**Sponsor:** 
 **License:** This specification text is licensed under CC BY 4.0 (see [/LICENSE-CC-BY-4.0.txt](../LICENSE-CC-BY-4.0.txt)). Reference code is licensed separately under Apache-2.0.
 
 ## Abstract

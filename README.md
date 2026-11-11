@@ -174,7 +174,7 @@ The `wrapAction` shim does this for you: it only accepts a decision signed by
 the same authority key the runtime holds, so the adapter that collects the
 decision must share that key (set `COUNTERSIGN_AUTHORITY_KEY`).
 
-Kaviyam by  is the first reference deployment.
+Kaviyam is the first reference deployment.
 
 ## Approval history
 
@@ -264,4 +264,3 @@ It's single-org and self-hosted: it reads and writes only the data directory you
   Copyright 2026 Haridarman Kumaresan
 - **Specification text** (`spec/`): CC BY 4.0 — see [LICENSE-CC-BY-4.0.txt](LICENSE-CC-BY-4.0.txt) (<https://creativecommons.org/licenses/by/4.0/>).
 - Spec author: Haridarman Kumaresan.
-- Sponsor: 

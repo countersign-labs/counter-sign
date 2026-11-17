@@ -12,7 +12,13 @@ import unicodedata
 
 from .canonical import canonicalize
 from .constants import COUNTERSIGN_VERSION, COUNTERSIGNATURE_CONTEXT
-from .keys import is_canonical_public_key, public_key_from_secret, sign_context, verify_context
+from .keys import (
+    b64url_decode,
+    b64url_encode,
+    public_key_from_secret,
+    sign_context,
+    verify_context,
+)
 
 _WEBAUTHN_PREFIXES = ("webauthn-ed25519:", "webauthn-p256:")
 
@@ -32,17 +38,32 @@ def is_webauthn_credential(key) -> bool:
 
 def is_valid_credential_descriptor(key) -> bool:
     """
-    True iff ``key`` is a well-formed passkey credential descriptor. An ed25519
-    passkey wraps a canonical raw key (``webauthn-ed25519:<canonical-key>``); a P-256
-    passkey carries a non-empty COSE key blob. (Full WebAuthn assertion verification
-    is a follow-up; this only validates the descriptor shape used by keyed approvers.)
+    True iff ``key`` is a well-formed passkey credential descriptor, exactly as the
+    reference's ``isValidCredentialDescriptor``: a known prefix followed by the key in
+    CANONICAL base64url (re-encoding the decoded bytes gives the same string), so two
+    spellings of one credential cannot pass as two approvers. An ed25519 passkey wraps
+    a 32-byte key (``webauthn-ed25519:<key>``); a P-256 passkey carries the 65-byte
+    uncompressed EC point, first byte 0x04 (``webauthn-p256:<point>``).
+
+    Like the reference, this is a structural check only: an off-curve point is not
+    rejected here, and can never pass an assertion. (Full WebAuthn assertion
+    verification is a follow-up; this client fails closed on passkey receipts.)
     """
     if not is_webauthn_credential(key):
         return False
-    material = key.split(":", 1)[1]
-    if key.startswith("webauthn-ed25519:"):
-        return is_canonical_public_key(material)
-    return isinstance(material, str) and len(material) > 0
+    prefix, length = (
+        ("webauthn-ed25519:", 32) if key.startswith("webauthn-ed25519:") else ("webauthn-p256:", 65)
+    )
+    material = key[len(prefix):]
+    try:
+        raw = b64url_decode(material)
+    except Exception:
+        return False
+    if len(raw) != length or b64url_encode(raw) != material:
+        return False
+    if prefix == "webauthn-p256:" and raw[0] != 0x04:  # uncompressed point marker
+        return False
+    return True
 
 
 def credential_key_material(key: str) -> str:
@@ -100,7 +121,8 @@ def verify_countersignature(cs, trusted_keys=None, webauthn=None) -> bool:
                 return False
         # Passkey (WebAuthn) receipt or a webauthn block: not supported by the core
         # client — fail closed (the reference verifier also fails closed without a policy).
-        if is_webauthn_credential(public_key) or cs.get("webauthn") is not None:
+        # Any `webauthn` key counts, null included, as in the reference.
+        if is_webauthn_credential(public_key) or "webauthn" in cs:
             return False
         return verify_context(public_key, COUNTERSIGNATURE_CONTEXT, canonicalize(unsigned), signature)
     except Exception:

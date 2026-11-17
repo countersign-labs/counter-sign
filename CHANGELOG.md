@@ -112,9 +112,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
   `restore()`; `wrapAction` gains the opt-in `pendingStore` option, and with it
   `onDelivered(record)`, which receives the issued record (so a partial delivery's
   `unreached` list reaches the caller).
-  Adapters can take their `PendingDecisions` from outside through
-  `PendingDecisionsSource` (`pending` or `pendingStore`) and `pendingDecisionsFor()`,
-  which returns a new in-memory one when neither is given.
+  For people writing their own adapter: an adapter that takes `pending` or
+  `pendingStore` in its config (`PendingDecisionsSource`) builds its book-keeping with
+  `pendingDecisionsFor(config)`, which returns a new in-memory `PendingDecisions` when
+  neither is set. The built-in adapters do not take either option; each keeps its own
+  in-memory `PendingDecisions`.
 - `resolveRule(name, request, { store, org }, { approvers: "vouched" })` resolves a policy
   rule into **vouched** approvers, the form the chat and email adapters accept, so the
   policy layer can feed a Slack / Telegram / WhatsApp Route. Quorum 1 only: any other

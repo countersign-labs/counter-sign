@@ -95,9 +95,10 @@ the `whatsapp:<number>` approvers the Intent names (`"single"` sends to
 goes to `WHATSAPP_TO` as before), `requirePhoneNumberId` only believes
 webhooks for your business number, and `confirmDecisions` replies to each
 press. Set `SLACK_APP_ID` / `SLACK_TEAM_ID` so a correctly signed payload from
-another Slack app or workspace is refused. In Telegram poll mode, a second
-process polling the same bot fails waiting requests with
-`TelegramPollingConflictError` instead of looping. After a decision, the
+another Slack app or workspace is refused. In Telegram poll mode, if two
+processes poll the same bot, whichever one receives Telegram's `409 Conflict`
+(possibly the one that started first) stops polling and fails its own waiting
+requests with `TelegramPollingConflictError` instead of looping. After a decision, the
 message says who decided and when, from the signed receipt. Setup for each is
 in [adapters/README.md](adapters/README.md).
 

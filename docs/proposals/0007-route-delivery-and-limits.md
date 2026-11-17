@@ -56,7 +56,7 @@ recipients for WhatsApp taken from the `whatsapp:` approvers. Because
 `awaitWithDefault` treats an adapter error as fail-closed, a refused delivery never
 runs the action.
 
-Already shipped on this branch, as opt-in adapter features (no spec change): the
+Already in the reference implementation (unreleased; see CHANGELOG), as opt-in adapter features (no spec change): the
 length checks (`enforceLimits: true` on the chat adapters, counted in the channel's
 strict units; without it they refuse only what the platform rejects anyway) and
 per-approver WhatsApp delivery (`recipientMode: "approvers"`). What remains is the

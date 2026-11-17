@@ -149,7 +149,7 @@ export class DiscordAdapter implements Adapter {
             json({
               type: 7,
               data: {
-                content: `${base}\n\nApproval ${result.collected}/${result.quorum} by <@${user?.id}> — awaiting more`,
+                content: `${base}\n\nApproval ${result.collected}/${result.quorum} recorded: <@${user?.id}> at ${result.countersignature.timestamp}. Awaiting more approvers.`,
                 components: interaction.message?.components ?? [],
               },
             });
@@ -158,7 +158,7 @@ export class DiscordAdapter implements Adapter {
           json({
             type: 7, // UPDATE_MESSAGE: resolved HERE (quorum met or veto) — strip the buttons
             data: {
-              content: `${base}\n\nResolved: ${result.decision.toUpperCase()} (last: <@${user?.id}>)`,
+              content: `${base}\n\nDecision recorded: ${result.decision.toUpperCase()} by <@${user?.id}> at ${result.countersignature.timestamp}`,
               components: [],
             },
           });

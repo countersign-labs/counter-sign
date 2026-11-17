@@ -15,7 +15,7 @@ import type { Decision, Intent, Resolution } from "../src/core/types.js";
 import { ReceiptLog, type ReceiptSink } from "../src/receipt-log.js";
 import { DurableDecisions, FilePendingStore, type PendingStore } from "../src/resumable.js";
 import { wrapAction } from "../src/shim.js";
-import { DeliveryPartialError } from "../src/adapter.js";
+import { DeliveryPartialError } from "../src/adapters/whatsapp.js";
 
 const agent = { id: "agent:test", keypair: generateKeypair() };
 const authority = generateKeypair().secretKey;

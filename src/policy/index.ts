@@ -3,4 +3,4 @@
 export * from "./types.js";
 export { validateRole, validateRule } from "./validate.js";
 export { PolicyLog, canonicalPolicyEntry, hashEntry } from "./log.js";
-export { resolveRule } from "./resolve.js";
+export { resolveRule, type ResolveOptions, type VouchedResolveDeps } from "./resolve.js";

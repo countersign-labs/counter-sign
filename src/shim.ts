@@ -10,6 +10,7 @@ import { createIntent, type AgentIdentity } from "./core/intent.js";
 import { generateKeypair, publicKeyFromSecret } from "./core/keys.js";
 import type { Countersignature, Intent, IntentFields, Resolution } from "./core/types.js";
 import type { ReceiptSink } from "./receipt-log.js";
+import { DurableDecisions, type PendingRecord, type PendingStore } from "./resumable.js";
 
 export interface WrapOptions {
   /** Signing identity of the requesting agent. Defaults to a per-process keypair. */
@@ -36,6 +37,26 @@ export interface WrapOptions {
    * passkey; without it a passkey receipt fails closed at verification.
    */
   webauthn?: WebAuthnPolicy;
+  /**
+   * Opt-in durable mode. With a store, the Intent is stored before it is
+   * delivered, and the decision is made final in the store and written to
+   * `receiptLog` before the hooks and the action run (see `DurableDecisions`). If
+   * the process restarts while waiting, `new DurableDecisions({ adapter, store,
+   * receiptLog }).restore()` picks the Intent up: it is decided once, or lapses
+   * to its Default. The wrapped function itself does not run after a restart
+   * (its arguments died with the process); act on what `restore()` returns.
+   */
+  pendingStore?: PendingStore;
+  /**
+   * With `pendingStore` only: called once the Intent has been stored and
+   * delivered, with its record, before the wait for the decision begins. On a
+   * partial delivery (`DeliveryPartialError`) the approvers not reached are in
+   * `record.unreached`; this hook is the only place `wrapAction` hands that
+   * list back (it is also on the store's record, `pendingStore.get(id)`).
+   * Not called without a `pendingStore`. If it throws, the call rejects and the
+   * action does not run; the Intent stays pending in the store.
+   */
+  onDelivered?: (record: PendingRecord) => void;
 }
 
 let processAgent: AgentIdentity | undefined;
@@ -96,14 +117,26 @@ export function wrapAction<A extends unknown[], R>(
     // action is silently blocked. Runs before anything is delivered.
     assertDeliverable(intent, authorityPub, webauthn);
 
-    await adapter.deliver(intent);
-    const resolution = await awaitWithDefault(intent, adapter.awaitResolution(intent), authority, webauthn);
+    let resolution: Resolution;
+    if (opts.pendingStore) {
+      // Durable mode: stored, delivered, decided once, final in the store and logged
+      // (fail-closed, as below) before anything else happens.
+      const durable = new DurableDecisions({ adapter, store: opts.pendingStore, receiptLog: opts.receiptLog, authorityKey: authority, webauthn });
+      const record = await durable.issue(intent);
+      opts.onDelivered?.(record);
+      resolution = await durable.decide(intent);
+    } else {
+      await adapter.deliver(intent);
+      resolution = await awaitWithDefault(intent, adapter.awaitResolution(intent), authority, webauthn);
+    }
     const decisive = resolution.countersignatures[resolution.countersignatures.length - 1];
     opts.onResolution?.(resolution);
     if (decisive) opts.onDecision?.(decisive);
     // Persist the receipts before acting: an approval we cannot remember is one
     // we decline to act on (fail-closed audit). Rejections are recorded too.
-    if (opts.receiptLog) await opts.receiptLog.record(resolution);
+    // The Intent goes along so a sink that keeps Intents can store it beside its receipts.
+    // (In durable mode this already happened inside decide().)
+    if (opts.receiptLog && !opts.pendingStore) await opts.receiptLog.record(resolution, intent);
     if (intent.callback) void postCallback(intent.callback, resolution);
 
     if (resolution.decision !== "approve") throw new IntentRejectedError(resolution, intent);

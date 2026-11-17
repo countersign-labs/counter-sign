@@ -6,7 +6,11 @@ export * from "./core/index.js";
 export {
   type Adapter,
   type SettleResult,
+  type PendingDecisionsOptions,
+  type PendingDecisionsSource,
   PendingDecisions,
+  pendingDecisionsFor,
+  DeliveryPartialError,
   assertVouchedApprovers,
   requireEnv,
   authorityKeyFromEnv,
@@ -38,12 +42,29 @@ export {
 } from "./registry.js";
 export {
   ReceiptLog,
+  FileIntentStore,
+  type IntentStore,
+  type ReceiptLogOptions,
   type ReceiptSink,
   type ReceiptLogReport,
   type ReceiptFault,
+  type TornTailReport,
   type VerifyAllOptions,
   type ChainEntry,
   type ChainHead,
   type ChainReport,
 } from "./receipt-log.js";
+export type { TornTail, QuarantineRecord } from "./durable-file.js";
+export {
+  DurableDecisions,
+  FilePendingStore,
+  type FilePendingStoreOptions,
+  type LockStep,
+  type PendingStore,
+  type PendingRecord,
+  type PendingStatus,
+  type DurableDecisionsOptions,
+  type RestoreOptions,
+  type RestoreReport,
+} from "./resumable.js";
 export * from "./policy/index.js";

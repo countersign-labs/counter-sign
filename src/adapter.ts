@@ -10,6 +10,7 @@ import { quorumOf } from "./core/intent.js";
 import { fromB64url, generateKeypair, verifyContext } from "./core/keys.js";
 import type { WebAuthnPolicy } from "./core/webauthn.js";
 import { LINK_CONTEXT, type Approver, type Countersignature, type Decision, type Intent, type Resolution } from "./core/types.js";
+import type { PendingRecord, PendingStore } from "./resumable.js";
 
 /**
  * The single interface every counter-sign adapter implements. Adapters are
@@ -82,6 +83,44 @@ interface PendingEntry {
 }
 
 /**
+ * deliver() sent the request to some approvers and then a send failed: the
+ * approvers in `reached` already hold live buttons, those in `unreached` were
+ * never asked. Thrown by the WhatsApp adapter in per-approver mode, and only
+ * once at least one send has succeeded; a failure on the first send throws the
+ * plain send error.
+ *
+ * What a press from a reached approver does depends on the caller:
+ *  - `wrapAction` (no `pendingStore`) rejects with this error and the action does
+ *    not run. Nobody waits on the Intent, so a reached approver's press is
+ *    ignored; tell them the request was withdrawn.
+ *  - `DurableDecisions.issue` (and `wrapAction` with a `pendingStore`) keeps the
+ *    Intent pending, marked delivered, so a reached approver's press counts; the
+ *    unreached are stored on the record in its `unreached` field. `issue()`
+ *    returns that record and does not rethrow this error. `wrapAction` returns
+ *    the action's result, not the record: it hands the record to the
+ *    `onDelivered` option, and the list is also in the store
+ *    (`pendingStore.get(intent_id)`).
+ * No API delivers an Intent to only the unreached approvers: to ask them, issue
+ * a new Intent.
+ */
+export class DeliveryPartialError extends CountersignError {
+  constructor(
+    public readonly intentId: string,
+    /** Actors (for WhatsApp, `whatsapp:<number>`) that were sent the request. */
+    public readonly reached: readonly string[],
+    /** Actors that were not sent it: the one whose send failed, then the rest. */
+    public readonly unreached: readonly string[],
+    /** The error from the send that failed. */
+    public readonly cause: unknown,
+  ) {
+    super(
+      `intent ${intentId} was delivered to ${reached.join(", ")} but not to ${unreached.join(", ")}: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}. The reached approvers hold live buttons.`,
+    );
+  }
+}
+
+/**
  * Guard for a VOUCHED-only adapter (chat buttons, email links): these can only
  * relay a server-vouched decision, so a `keyed` approver's input can't reach the
  * quorum — settle() would drop it and the Intent would fall to its Default with no
@@ -95,9 +134,77 @@ export function assertVouchedApprovers(intent: Intent): void {
     );
 }
 
+/** Options for {@link PendingDecisions}. */
+export interface PendingDecisionsOptions {
+  /**
+   * Make finality survive a restart. With a store, every resolution is made final
+   * in the store (first wins) before the waiting promise resolves, and `wait()`
+   * for an Intent the store holds as final returns that decision instead of
+   * opening a new wait — at any time, not only before the deadline. Call
+   * `restore()` once before the first `wait()`. Without a store, behaviour is
+   * exactly as before: in memory only.
+   */
+  store?: PendingStore;
+}
+
+/**
+ * The optional constructor input an adapter can take so its pending decisions
+ * come from outside instead of a fresh in-memory {@link PendingDecisions}. Spread
+ * into an adapter's config and resolved with {@link pendingDecisionsFor}; with
+ * neither field set the adapter behaves exactly as before.
+ */
+export interface PendingDecisionsSource {
+  /**
+   * Use this PendingDecisions (for example one built over a `PendingStore`, on
+   * which the owner calls `restore()` at start-up, before the adapter is used).
+   */
+  pending?: PendingDecisions;
+  /**
+   * Or build one over this store. The adapter's waits are refused until its
+   * `restore()` has run, so an adapter given this must expose its PendingDecisions
+   * (or call `restore()` itself) before the first `awaitResolution`.
+   */
+  pendingStore?: PendingStore;
+}
+
+/**
+ * The PendingDecisions an adapter should use: the one it was given, one over the
+ * store it was given, or (the default, as before) a new in-memory one.
+ */
+export function pendingDecisionsFor(source: PendingDecisionsSource = {}): PendingDecisions {
+  if (source.pending && source.pendingStore)
+    throw new CountersignError("pass either `pending` or `pendingStore` to an adapter, not both (a given PendingDecisions already has its store)");
+  if (source.pending) return source.pending;
+  return source.pendingStore ? new PendingDecisions({ store: source.pendingStore }) : new PendingDecisions();
+}
+
 /** Book-keeping shared by all adapters: intents awaiting human decisions. */
 export class PendingDecisions {
   private entries = new Map<string, PendingEntry>();
+  private readonly store?: PendingStore;
+  private restored = false;
+  /** final decisions known to the store (loaded by restore(), added by finish()); never expire */
+  private durableFinal = new Map<string, Resolution>();
+
+  constructor(opts: PendingDecisionsOptions = {}) {
+    this.store = opts.store;
+  }
+
+  /**
+   * Load the store's final decisions, so a re-wait after a restart returns the
+   * recorded decision and a late answer is ignored. Returns the store's records
+   * still pending, for the owner to re-arm (`wait()` each one again, or use
+   * `DurableDecisions.restore()`, which also lapses expired ones). Without a store
+   * it returns [] and changes nothing.
+   */
+  async restore(): Promise<PendingRecord[]> {
+    if (!this.store) return [];
+    const records = await this.store.list();
+    for (const r of records) if (r.status === "final" && r.resolution) this.durableFinal.set(r.intent.intent_id, r.resolution);
+    this.restored = true;
+    return records.filter((r) => r.status === "pending");
+  }
+
   /**
    * Terminal outcomes (spec §4 finality). Once an intent RESOLVES, its live entry is
    * deleted but a tombstone is kept here until its deadline. A later wait() for that
@@ -110,6 +217,12 @@ export class PendingDecisions {
   private resolved = new Map<string, { resolution: Resolution; deadline: number }>();
 
   wait(intent: Intent): Promise<Resolution> {
+    if (this.store) {
+      if (!this.restored)
+        return Promise.reject(new CountersignError("PendingDecisions: call restore() before wait() when a store is set, so a decided Intent is never re-opened"));
+      const final = this.durableFinal.get(intent.intent_id);
+      if (final) return Promise.resolve(final);
+    }
     // Finality: a resolved intent yields its recorded decision, never a reopenable wait.
     // Gated on the WALL CLOCK (Date.now() vs the recorded deadline) — the SAME authority
     // record()/settle() use — not a timer. That makes finality immune to Node's ~24.8-day
@@ -293,7 +406,23 @@ export class PendingDecisions {
     const now = Date.now();
     for (const [id, t] of this.resolved) if (now >= t.deadline) this.resolved.delete(id);
     this.resolved.set(intentId, { resolution, deadline: deadline(entry.intent) });
-    entry.resolve(resolution);
+    if (!this.store) {
+      entry.resolve(resolution);
+      return;
+    }
+    // Durable finality: the waiter (and so the guarded action) proceeds only once the
+    // store holds the decision. First wins in the store, so hand back ITS answer. If the
+    // store write fails, nothing durable was decided: drop the tombstone and fail the wait.
+    this.store.finalize(entry.intent, resolution).then(
+      (winner) => {
+        this.durableFinal.set(intentId, winner);
+        entry.resolve(winner);
+      },
+      (err: unknown) => {
+        if (this.resolved.get(intentId)?.resolution === resolution) this.resolved.delete(intentId);
+        entry.reject(err instanceof Error ? err : new CountersignError(`could not store the decision for ${intentId}`));
+      },
+    );
   }
 
   /**

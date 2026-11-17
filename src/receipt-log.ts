@@ -3,8 +3,7 @@
 // Licensed under the Apache License, Version 2.0; see LICENSE at repo root.
 
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
 import { canonicalize } from "./core/canonical.js";
 import { normalizeActor, verifyCountersignature, type VerifyOptions } from "./core/countersignature.js";
 import { DEFAULT_TIMEOUT_ACTOR, deadline } from "./core/defaults.js";
@@ -12,6 +11,7 @@ import { assertIntentInvariants, quorumOf, verifyIntent } from "./core/intent.js
 import { credentialKeyMaterial, isValidCredentialDescriptor, isWebAuthnCredential } from "./core/webauthn.js";
 import { CountersignError } from "./core/errors.js";
 import { isCanonicalPublicKey, toB64url } from "./core/keys.js";
+import { completeLastLine, durableAppend, endsClean, readQuarantine, repairTornTail, splitTornTail, wholeLines, type TornTail } from "./durable-file.js";
 import type { Approver, Countersignature, Intent, Resolution } from "./core/types.js";
 
 /**
@@ -22,8 +22,59 @@ import type { Approver, Countersignature, Intent, Resolution } from "./core/type
  * receipts it is given.
  */
 export interface ReceiptSink {
-  /** Durably record every receipt that produced a Resolution. */
-  record(resolution: Resolution): Promise<void> | void;
+  /**
+   * Durably record every receipt that produced a Resolution. `intent` is the
+   * Intent they decide; the runtime passes it so a sink that keeps Intents (see
+   * `ReceiptLogOptions.intents`) can store it. A sink may ignore it.
+   */
+  record(resolution: Resolution, intent?: Intent): Promise<void> | void;
+}
+
+/**
+ * Where the signed Intents behind a log's receipts are kept. A vouched receipt
+ * binds only an `intent_id`, so auditing it later needs the Intent it decides;
+ * the receipt log itself stores receipts only. Implement it over anything; the
+ * contract is that `put` durably stores the Intent before it resolves, and never
+ * lets one `intent_id` be rebound to different content.
+ */
+export interface IntentStore {
+  /** Durably store an Intent. Idempotent for the same Intent; rejects a different Intent under a stored id. */
+  put(intent: Intent): Promise<void>;
+  get(intentId: string): Promise<Intent | undefined>;
+  /** Every stored Intent, in the order first stored. */
+  all(): Promise<Intent[]>;
+}
+
+/** Options for a file-backed {@link ReceiptLog}. Every option keeps the receipts file format unchanged. */
+export interface ReceiptLogOptions {
+  /**
+   * Flush each append to stable storage (`fdatasync`) before `record()` resolves,
+   * so an approval the runtime acts on is already on disk. Default true. Turn it
+   * off only for tests and throwaway logs.
+   */
+  fsync?: boolean;
+  /**
+   * Opt in to handling a torn last line (a line with no newline that does not
+   * parse, left by a crash in mid-append, or an append still being written).
+   * Default false: a torn last line makes reads and writes throw, exactly as in
+   * 0.2.0.
+   *
+   * With true, reads skip it and `verifyAll` reports it in `tornTails` (`ok`
+   * false), WITHOUT changing the file: a reader never writes. Only this
+   * instance's own appends repair: before each append, a torn end is moved into
+   * `<file>.quarantine.jsonl` and the log is cut back to its last whole line, so
+   * set it on the log's single writer (and on any auditor that should report
+   * rather than throw). A bad line in the middle of the file is never repaired;
+   * it stays a hard fault.
+   */
+  repairTornTail?: boolean;
+  /**
+   * Keep each Intent beside its receipts, so `verifyAll` can audit vouched
+   * receipts and timeout Defaults without being handed the Intents. `true` uses
+   * a sidecar file, `<file>.intents.jsonl` (one canonical Intent per line,
+   * flushed like the log). Or pass any {@link IntentStore}. Off by default.
+   */
+  intents?: boolean | IntentStore;
 }
 
 /**
@@ -71,6 +122,30 @@ export interface ReceiptFault {
   reason: "invalid-signature" | "untrusted-key" | "unknown-intent" | "unverified-intent" | "missing-webauthn-policy" | "missing-authority-key" | "malformed";
 }
 
+/**
+ * A torn last line, as `verifyAll` reports it in {@link ReceiptLogReport.tornTails}.
+ * It is not one of the stored entries: the bytes never made a whole line, so a
+ * `record()` that wrote them either has not resolved yet or failed, and nothing
+ * should have acted on them. It stays reported until the quarantine file is
+ * reviewed and archived.
+ */
+export interface TornTailReport {
+  /** zero-based line index the torn bytes would have been */
+  index: number;
+  /** the intent_id the torn bytes mention, when one can be read from them; "" otherwise */
+  intent_id: string;
+  /** byte offset in the log where the torn bytes start (or started, before they were moved) */
+  offset: number;
+  /** number of torn bytes */
+  length: number;
+  /**
+   * true: moved into `<file>.quarantine.jsonl` by the writer. false: still at the
+   * end of the log, either a crash leftover the writer has not met yet or an
+   * append still being written (look again: it then becomes a whole line).
+   */
+  quarantined: boolean;
+}
+
 /** The result of re-verifying an entire ReceiptLog. */
 export interface ReceiptLogReport {
   total: number;
@@ -78,8 +153,15 @@ export interface ReceiptLogReport {
   faults: ReceiptFault[];
   /** completeness: the hash chain over the entries (edit / insert / reorder / delete evidence) */
   chain: ChainReport;
-  /** true when every receipt verified AND the chain is intact */
+  /** true when every receipt verified AND the chain is intact (and, when reported, there are no torn tails) */
   ok: boolean;
+  /**
+   * Torn last lines: the ones moved into quarantine, and one still at the end of
+   * the file. Present only when the log opted into `repairTornTail`, or when its
+   * quarantine file holds records; otherwise absent, so a report is shaped
+   * exactly as in 0.2.0. Any entry makes `ok` false.
+   */
+  tornTails?: TornTailReport[];
 }
 
 export interface VerifyAllOptions extends VerifyOptions {
@@ -139,6 +221,14 @@ function isChainEntry(o: unknown): o is ChainEntry {
     // receipt must be a Countersignature-shaped object, not an array or garbage
     isBareReceipt((o as ChainEntry).receipt)
   );
+}
+
+/** True when `last` is the entry `head` was taken from: its seq, its hash, and its link to `before`. */
+function isHeadEntry(last: unknown, before: unknown, head: { count: number; lastHash: string }): boolean {
+  if (!isChainEntry(last) || head.count < 1) return false;
+  if (last.seq !== head.count - 1 || linkHash(last) !== head.lastHash) return false;
+  const prev = before === undefined ? CHAIN_GENESIS : linkHash(before);
+  return last.prev === prev;
 }
 
 function isBareReceipt(o: unknown): o is Countersignature {
@@ -211,6 +301,17 @@ function walkChain(lines: ParsedLine[], expectedHead?: ChainHead): ChainReport {
  * Intent — an approval, a veto, or a timeout Default — is recorded before the
  * guarded action runs. Omit it and counter-sign stays stateless.
  *
+ * Durability: each append is flushed to stable storage (`fdatasync`) before
+ * `record()` resolves, so the guarded action never runs on an approval a power
+ * cut could take back (opt out with `fsync: false`). A crash in mid-append can
+ * leave a torn last line; by default it makes reads throw, as in 0.2.0. (A
+ * last chain entry that only lost its newline is not torn: once the rest of the
+ * file reads cleanly, the next append writes the newline first, by default too.) With
+ * `repairTornTail: true`, reads skip it and `verifyAll` reports it in
+ * `tornTails`, and the writer moves it into `<file>.quarantine.jsonl` before its
+ * next append (see `repair()`). Reading never changes the file. A corrupt line
+ * anywhere else is never repaired: reads throw, as they always have.
+ *
  * Write order within a process is preserved (writes are queued, so concurrent
  * records never interleave and each links onto the last). This is a
  * single-writer log: point separate processes at separate files, or put a real
@@ -219,12 +320,52 @@ function walkChain(lines: ParsedLine[], expectedHead?: ChainHead): ChainReport {
  * `unchained-entry`.
  */
 export class ReceiptLog implements ReceiptSink {
-  private tail: Promise<void> = Promise.resolve();
-  private ensuredDir = false;
+  private tail: Promise<unknown> = Promise.resolve();
   /** in-memory chain head, lazily recovered from the file on first write */
   private headState?: { count: number; lastHash: string };
+  private readonly fsync: boolean;
+  private readonly repairs: boolean;
+  /** where torn tails are moved: `<file>.quarantine.jsonl` */
+  readonly quarantinePath: string;
+  /** where Intents are kept beside the receipts, when `intents` is set */
+  readonly intentStore?: IntentStore;
 
-  constructor(public readonly filePath: string) {}
+  constructor(
+    public readonly filePath: string,
+    opts: ReceiptLogOptions = {},
+  ) {
+    this.fsync = opts.fsync ?? true;
+    this.repairs = opts.repairTornTail ?? false;
+    this.quarantinePath = `${filePath}.quarantine.jsonl`;
+    if (opts.intents === true) this.intentStore = new FileIntentStore(`${filePath}.intents.jsonl`, { fsync: this.fsync });
+    else if (opts.intents) this.intentStore = opts.intents;
+  }
+
+  /**
+   * Repair the log now: if its last line is torn (a crash in mid-append), move
+   * those bytes into {@link quarantinePath} and cut the log back to its last
+   * whole line. Returns what was moved, or null. This WRITES to the log: call it
+   * only from the log's single writer, never from an auditor (a torn end may be
+   * the writer's append still in flight). With `repairTornTail: true` the writer
+   * also does this on its own before each append. It never touches a bad line in
+   * the middle of the file.
+   */
+  repair(): Promise<TornTail | null> {
+    return this.enqueue(async () => {
+      const torn = await repairTornTail(this.filePath, this.quarantinePath, this.fsync);
+      this.headState = undefined;
+      return torn;
+    });
+  }
+
+  /**
+   * Store an Intent in this log's {@link intentStore} (a no-op without one).
+   * Call it when the Intent is issued, so it is on disk even while still pending;
+   * `record(resolution, intent)` also stores it, before the receipts.
+   */
+  async rememberIntent(intent: Intent): Promise<void> {
+    if (this.intentStore) await this.intentStore.put(intent);
+  }
 
   /** Append a single receipt as one chained entry. */
   append(cs: Countersignature): Promise<void> {
@@ -237,7 +378,12 @@ export class ReceiptLog implements ReceiptSink {
    * veto, or the timeout Default. Rejections are recorded too; a blocked action
    * is part of the history, not an absence from it.
    */
-  record(resolution: Resolution): Promise<void> {
+  record(resolution: Resolution, intent?: Intent): Promise<void> {
+    if (intent && this.intentStore) {
+      // The Intent goes to disk first, so a stored receipt always has its Intent beside it.
+      const store = this.intentStore;
+      return store.put(intent).then(() => this.record(resolution));
+    }
     return resolution.countersignatures.length ? this.write(resolution.countersignatures) : Promise.resolve();
   }
 
@@ -283,8 +429,21 @@ export class ReceiptLog implements ReceiptSink {
    * of those Intents; and the hash chain is walked (optionally against
    * `expectedHead`). `ok` is true only when no receipt faulted AND the chain is
    * intact.
+   *
+   * When the log keeps Intents (`intents` option) and the caller supplies none,
+   * the stored Intents are used as `intents`; caller-supplied ones always win.
+   * Stored Intents are checked exactly like supplied ones (agent signature, the
+   * `trustedAgentKeys` pin), so a tampered sidecar faults, it never vouches.
+   *
+   * With `repairTornTail: true`, torn last lines (in quarantine, or still at the
+   * end of the file) are listed in `tornTails` and make `ok` false. Reading never
+   * changes the file.
    */
   async verifyAll(opts: VerifyAllOptions = {}): Promise<ReceiptLogReport> {
+    if (opts.intents === undefined && this.intentStore) {
+      const stored = await this.intentStore.all();
+      if (stored.length) opts = { ...opts, intents: stored };
+    }
     // Validate option SHAPES up front. An untyped (JS) caller can pass a malformed value —
     // `null`/a number/a bare object for a string|array option, a single Intent for an array, an
     // empty-string agent pin. Reject each with a clean CountersignError (every other misconfig
@@ -392,9 +551,24 @@ export class ReceiptLog implements ReceiptSink {
         } else if (typeof i?.intent_id === "string") unverifiedIntentIds.add(i.intent_id);
       }
     }
-    const lines = await this.parseLines();
+    const { lines, torn: tornNow } = await this.parseFile();
     const chain = walkChain(lines, opts.expectedHead);
     const faults: ReceiptFault[] = [];
+    // Torn tails: the quarantined ones, once each (a repair interrupted by a crash may record the
+    // same bytes twice), then one still at the end of the file. Read only; nothing is moved here.
+    const quarantined = await readQuarantine(this.quarantinePath);
+    let torn: TornTailReport[] | undefined;
+    if (this.repairs || quarantined.length || tornNow) {
+      torn = [];
+      const seenTorn = new Set<string>();
+      for (const q of quarantined) {
+        const key = `${q.offset}:${q.sha256}`;
+        if (seenTorn.has(key)) continue;
+        seenTorn.add(key);
+        torn.push({ index: q.line, intent_id: typeof q.intent_id === "string" ? q.intent_id : "", offset: q.offset, length: q.length, quarantined: true });
+      }
+      if (tornNow) torn.push({ index: tornNow.line, intent_id: tornNow.intent_id, offset: tornNow.offset, length: tornNow.length, quarantined: false });
+    }
     lines.forEach((line, index) => {
       let cs: Countersignature;
       try {
@@ -499,20 +673,36 @@ export class ReceiptLog implements ReceiptSink {
       }
       if (reason) faults.push({ index, intent_id: cs.intent_id, actor: cs.actor, reason });
     });
-    return { total: lines.length, valid: lines.length - faults.length, faults, chain, ok: faults.length === 0 && chain.intact };
+    const report: ReceiptLogReport = { total: lines.length, valid: lines.length - faults.length, faults, chain, ok: faults.length === 0 && chain.intact };
+    // A torn tail is not one of the stored lines, so it does not reduce `valid`; it does fail `ok`.
+    if (torn) {
+      report.tornTails = torn;
+      if (torn.length) report.ok = false;
+    }
+    return report;
   }
 
-  /** Read + parse every line into `{ obj, hash }`; throws loud on a corrupt line. */
+  /** Read + parse every line into `{ obj, hash }`; throws loud on a corrupt line. Never writes. */
   private async parseLines(): Promise<ParsedLine[]> {
-    let text: string;
+    return (await this.parseFile()).lines;
+  }
+
+  /**
+   * Read and parse the file. READ ONLY. Strict, as in 0.2.0, unless `repairTornTail`
+   * is on: then a torn last segment (no newline, does not parse) is returned
+   * separately in `torn`, for `verifyAll` to report, instead of throwing.
+   */
+  private async parseFile(): Promise<{ lines: ParsedLine[]; torn?: TornTail }> {
+    let buf: Buffer;
     try {
-      text = await readFile(this.filePath, "utf8");
+      buf = await readFile(this.filePath);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return { lines: [] };
       throw err;
     }
     const out: ParsedLine[] = [];
-    const lines = text.split("\n");
+    const split = this.repairs ? splitTornTail(buf) : { lines: buf.toString("utf8").split("\n"), torn: undefined };
+    const lines = split.lines;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
@@ -524,7 +714,7 @@ export class ReceiptLog implements ReceiptSink {
       }
       out.push({ obj, hash: linkHash(obj) });
     }
-    return out;
+    return { lines: out, torn: split.torn };
   }
 
   /**
@@ -532,21 +722,36 @@ export class ReceiptLog implements ReceiptSink {
    * calls never interleave, and each entry links onto the one before it.
    */
   private write(receipts: Countersignature[]): Promise<void> {
-    const run = this.tail.then(
-      () => this.appendChained(receipts),
-      () => this.appendChained(receipts),
-    );
+    return this.enqueue(() => this.appendChained(receipts));
+  }
+
+  /** Run `task` after every earlier queued task (repair and writes never overlap). */
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.tail.then(task, task);
     // Keep the chain from staying rejected; each caller still sees its own error.
     this.tail = run.catch(() => {});
     return run;
   }
 
   private async appendChained(receipts: Countersignature[]): Promise<void> {
-    if (!this.ensuredDir) {
-      await mkdir(dirname(this.filePath), { recursive: true });
-      this.ensuredDir = true;
+    // Only the writer repairs, and only here, inside its own write queue: if the file does
+    // not end on a whole line (a crash in mid-append, before or since this instance opened),
+    // move the torn end aside and recover the head again before linking onto it.
+    if (this.repairs && !(await endsClean(this.filePath))) {
+      await repairTornTail(this.filePath, this.quarantinePath, this.fsync);
+      this.headState = undefined;
     }
     const head = await this.ensureHead();
+    if (!this.repairs) {
+      // By default too, a last entry that only lost its newline gets it back before the
+      // append, so the new entry is not glued onto it (0.2.0 did that, and the log then read
+      // as corrupt). Only after the head was read (so an append that fails on damage
+      // elsewhere writes nothing, as in 0.2.0), and only when the last segment is this log's
+      // own head entry: a chain entry with the head's seq and hash, linked to the line
+      // before it. Nothing is cut or moved; any other last segment is left exactly as it is,
+      // and the append behaves as in 0.2.0.
+      await completeLastLine(this.filePath, this.fsync, (last, before) => isHeadEntry(last, before, head));
+    }
     let { count, lastHash } = head;
     let out = "";
     for (const receipt of receipts) {
@@ -556,7 +761,16 @@ export class ReceiptLog implements ReceiptSink {
       lastHash = sha256b64url(line);
       count += 1;
     }
-    await appendFile(this.filePath, out);
+    try {
+      // Written and flushed (fdatasync) before record() resolves: an approval the
+      // runtime acts on is already on disk.
+      await durableAppend(this.filePath, out, this.fsync);
+    } catch (err) {
+      // The write may have left a partial line. With the repair opted in, forget the head;
+      // the next append's check moves any torn bytes aside first and links onto what is left.
+      if (this.repairs) this.headState = undefined;
+      throw err;
+    }
     this.headState = { count, lastHash };
   }
 
@@ -568,5 +782,90 @@ export class ReceiptLog implements ReceiptSink {
       ? { count: lines.length, lastHash: lines[lines.length - 1].hash }
       : { count: 0, lastHash: CHAIN_GENESIS };
     return this.headState;
+  }
+}
+
+/**
+ * The default {@link IntentStore}: one canonical Intent per line in an
+ * append-only JSONL file, flushed (`fdatasync`) before `put` resolves. A torn
+ * last line is skipped by reads (which never change the file) and moved into
+ * `<file>.quarantine.jsonl` by the next `put`, before it appends: only the
+ * writer repairs. Single writer, like the log beside it. Intents are
+ * stored as given and checked only when used: `verifyAll` verifies each one's
+ * agent signature, so an edited line faults its receipts rather than vouching
+ * for them.
+ */
+export class FileIntentStore implements IntentStore {
+  private tail: Promise<unknown> = Promise.resolve();
+  private cache?: Map<string, { intent: Intent; canonical: string }>;
+  private readonly fsync: boolean;
+  readonly quarantinePath: string;
+
+  constructor(
+    public readonly filePath: string,
+    opts: { fsync?: boolean } = {},
+  ) {
+    this.fsync = opts.fsync ?? true;
+    this.quarantinePath = `${filePath}.quarantine.jsonl`;
+  }
+
+  put(intent: Intent): Promise<void> {
+    return this.enqueue(async () => {
+      if (!intent || typeof intent !== "object" || typeof intent.intent_id !== "string")
+        throw new CountersignError("intent store: not an Intent (no intent_id)");
+      const cache = await this.load();
+      const canonical = canonicalize(intent);
+      const have = cache.get(intent.intent_id);
+      if (have) {
+        if (have.canonical === canonical) return;
+        throw new CountersignError(`intent store: ${intent.intent_id} is already stored with different content — an intent_id is never rebound`);
+      }
+      // The writer's repair, on the write path only: never append onto a torn end. The cache
+      // already left the torn bytes out, so it stays right.
+      if (!(await endsClean(this.filePath))) await repairTornTail(this.filePath, this.quarantinePath, this.fsync);
+      await durableAppend(this.filePath, canonical + "\n", this.fsync);
+      cache.set(intent.intent_id, { intent: JSON.parse(canonical) as Intent, canonical });
+    });
+  }
+
+  async get(intentId: string): Promise<Intent | undefined> {
+    return (await this.enqueue(() => this.load())).get(intentId)?.intent;
+  }
+
+  async all(): Promise<Intent[]> {
+    return [...(await this.enqueue(() => this.load())).values()].map((v) => v.intent);
+  }
+
+  /** Load (once). READ ONLY: a torn last line is left out, not repaired. The first stored copy of an id wins. */
+  private async load(): Promise<Map<string, { intent: Intent; canonical: string }>> {
+    if (this.cache) return this.cache;
+    let text = "";
+    try {
+      text = await readFile(this.filePath, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    const cache = new Map<string, { intent: Intent; canonical: string }>();
+    const lines = wholeLines(text);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      let obj: unknown;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        throw new CountersignError(`intent store ${this.filePath} is corrupt at line ${i + 1}`);
+      }
+      const id = (obj as Intent | null)?.intent_id;
+      if (typeof id === "string" && !cache.has(id)) cache.set(id, { intent: obj as Intent, canonical: canonicalize(obj) });
+    }
+    this.cache = cache;
+    return cache;
+  }
+
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.tail.then(task, task);
+    this.tail = run.catch(() => {});
+    return run;
   }
 }

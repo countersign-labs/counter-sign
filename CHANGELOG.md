@@ -24,6 +24,33 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
   single definition in `core/countersignature.ts`, consumed by the signing page, the
   verifier, and the vector generator alike — signer/verifier/vectors can no longer
   drift by copy-paste. Internal refactor; no public-API or wire change.
+- **Chat adapters refuse, before sending anything, a request the platform would reject
+  anyway**: Telegram text over 4096 characters, a Slack section over 3000 characters
+  (both counted in code points, so the refusal covers only text the platform rejects
+  however it counts), and a WhatsApp template variable with a newline or tab. 0.2.0 sent
+  these and then failed on the platform's error (`telegram sendMessage failed`, `slack
+  chat.postMessage failed: invalid_blocks`, `whatsapp template send failed`); now
+  `deliver` throws a `CountersignError` naming the problem and makes no API call.
+  Anything 0.2.0 delivered is still delivered; the stricter checks are opt-in
+  (`enforceLimits`, under Added).
+- Telegram poll mode: a 409 Conflict from `getUpdates` (another process polling the same
+  bot, or a webhook set) stops polling and fails waiting requests with one clear
+  `TelegramPollingConflictError` instead of retrying every 2 seconds forever.
+- After a decision, Telegram, Slack and Discord messages say "Decision recorded:
+  <DECISION> by <who> at <receipt timestamp>" (Discord said "Resolved: <DECISION> (last:
+  <who>)"); Slack keeps the original request visible instead of replacing it with a
+  one-liner, unless it is too long to repeat in a section. While a quorum is open:
+  "Approval n/q recorded: <who> at <time>. Awaiting more approvers." The reason: the
+  message now shows who decided and when, taken from the signed receipt, so the chat
+  record matches the audit record. Code that parses the old Discord "Resolved: …" text
+  must be updated.
+- `resolveRule` called without `deps.registry` in keyed mode now throws a clear
+  `CountersignError` instead of a `TypeError`.
+- **`ReceiptLog` flushes every append to disk by default** (`fdatasync`, plus the
+  directory of a new file), so `record()` and `append()` resolve only once the receipt is on stable storage. Results, files and errors are
+  unchanged; each append now waits for the disk, which adds latency (most on slow or
+  network disks). Why: the guarded action must never run on an approval a power cut
+  could take back. Opt out with `new ReceiptLog(path, { fsync: false })` (see Added).
 
 ### Added
 - **Conformance vectors for passkey / WebAuthn receipts** (`webauthn` section,
@@ -33,6 +60,152 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it reache
   frame, missing User-Present, UV-required-but-absent, forged authenticator key,
   cross-intent replay, and the no-RP-policy fail-closed rule — plus resolution-level
   accept/reject including a 2-of-2 passkey quorum, a forged slot, and under-quorum.
+- **`ReceiptLog` is durable before anyone acts.** Every append is flushed (`fdatasync`)
+  before `record()` resolves, and a new file's directory is flushed too. Opt out with
+  `new ReceiptLog(path, { fsync: false })`. This is a new default; see Changed.
+- **`ReceiptLog` torn-tail handling, opt-in** (`{ repairTornTail: true }`; default off,
+  so a torn last line still throws exactly as in 0.2.0). Reads skip a partial last line
+  and `verifyAll` lists it in a new optional report field, `tornTails` (type
+  `TornTailReport`: `index`, `intent_id`, `offset`, `length`, `quarantined`), with `ok`
+  false. Reading never changes the file. Only the instance that appends repairs: before
+  each append it moves a torn end, byte for byte, to `<file>.quarantine.jsonl` and cuts
+  the log back to its last whole line; `repair()` does the same on demand. A whole last
+  entry that only lost its newline is kept. A corrupt line anywhere else is still a hard
+  error. The `ReceiptFault` reason union is unchanged, and `tornTails` is absent from a
+  report unless the log opted in or has a quarantine file.
+- **`ReceiptLog` can keep each Intent beside its receipts** (`{ intents: true }`, sidecar
+  `<file>.intents.jsonl`, or any `IntentStore`; `FileIntentStore` is the default), so
+  `verifyAll` audits vouched receipts and timeout Defaults without being handed the
+  Intents. `ReceiptSink.record` receives the Intent as an optional second argument. The
+  receipts file format is unchanged.
+- **Resumable decisions.** `DurableDecisions` issues an Intent now and resolves it later,
+  across a restart: `restore()` re-arms unfinished Intents with their remaining time,
+  lapses expired ones to the signed Default, finishes decisions taken but not logged, and
+  never decides an Intent twice. It lapses by the Intent's own deadline, and a record it
+  cannot restore is listed in `RestoreReport.failed` while the others are still restored.
+  A stored Intent that no longer carries its agent's signature (an edited store file) is
+  listed in `failed` and never re-armed or delivered again. A delivery that reached some
+  approvers but not others (`DeliveryPartialError`) keeps the Intent pending, marked
+  delivered, so the reached approvers' presses count; the missed approvers are stored and
+  returned in the new `PendingRecord.unreached` (`PendingStore.markDelivered` takes them
+  as an optional second argument). A delivery that reached nobody abandons the Intent
+  and rethrows. A re-delivery in `restore()` that fails outright abandons the Intent only
+  if no earlier delivery reached anyone; if one did, those approvers still hold live
+  buttons, so it stays pending and re-armed and the failure is listed in the new
+  `RestoreReport.redeliveryFailed`.
+  Backed by the `PendingStore` interface and `FilePendingStore` (flushed JSONL events, a
+  lock file enforcing one writer per store; run one process per store). The lock records
+  pid, host, process start time and a random token and is kept fresh by a heartbeat
+  (`lockLeaseMs`, default 10 s). On the same host it is taken over when its process is
+  gone or its heartbeat is older than the lease. A lock naming this process's own pid is
+  taken over only when its last heartbeat predates this process and is older than two
+  heartbeat intervals: a crash-restart in a container opens at once (or after waiting out
+  those two intervals), while a live twin container sharing the hostname and pid is
+  refused. Takeover is atomic (rename aside, check, exclusive create, re-read), so two
+  processes starting together never both hold it, and an opener that loses a round backs
+  off and retries a bounded number of times instead of failing at once. Every write
+  checks, before and after its append, that the lock is still the handle's and that the
+  file holds only the handle's own bytes; otherwise the write rejects, this handle does
+  not act on it, and the handle stops writing. If the event landed, the store's next
+  holder (or the next open) replays it, so a rejected issue may still be delivered and a
+  rejected decision may still be logged. `PendingDecisions` accepts `{ store }` and gains
+  `restore()`; `wrapAction` gains the opt-in `pendingStore` option, and with it
+  `onDelivered(record)`, which receives the issued record (so a partial delivery's
+  `unreached` list reaches the caller).
+  Adapters can take their `PendingDecisions` from outside through
+  `PendingDecisionsSource` (`pending` or `pendingStore`) and `pendingDecisionsFor()`,
+  which returns a new in-memory one when neither is given.
+- `resolveRule(name, request, { store, org }, { approvers: "vouched" })` resolves a policy
+  rule into **vouched** approvers, the form the chat and email adapters accept, so the
+  policy layer can feed a Slack / Telegram / WhatsApp Route. Quorum 1 only: any other
+  quorum is refused, never downgraded. An optional `channel` keeps only members on one
+  channel (`"slack"` → `slack:*`). No registry is needed in this mode. Default (keyed)
+  resolution is unchanged. The `ResolveOptions` and `VouchedResolveDeps` types are
+  exported.
+- Slack adapter: optional `appId` / `teamId` (`SLACK_APP_ID`, `SLACK_TEAM_ID`); a signed
+  interactivity payload from another app or workspace is refused with 403.
+- **WhatsApp recipient modes, opt-in** (`recipientMode`, `WHATSAPP_RECIPIENT_MODE`). With
+  no mode, every request goes to `to` / `WHATSAPP_TO` with no check on the approvers,
+  exactly as in 0.2.0 (and construction without `WHATSAPP_TO` still throws the 0.2.0
+  error). `"approvers"` sends one template to each `whatsapp:<number>` approver the Intent
+  names (no `to` needed) and refuses an Intent naming none or naming one not written as
+  bare E.164 digits (the webhook reports `from` without a `+`). `"single"` sends to `to`
+  and refuses an Intent whose WhatsApp approvers are not exactly that number, instead of
+  sending it and silently ignoring the press. Exported type `WhatsAppRecipientMode`.
+- `DeliveryPartialError` (from `adapters/whatsapp`, and the package root): in
+  `"approvers"` mode, a send that fails after earlier recipients were sent the request
+  throws it, with `intentId`, `reached` and `unreached` actor lists and the send error as
+  `cause`. A failure on the first send throws the plain send error. With plain
+  `wrapAction` the call rejects and a reached approver's press is ignored (tell them the
+  request was withdrawn); `DurableDecisions` keeps the Intent pending instead (see
+  Resumable decisions). Nothing delivers to only the unreached; issue a new Intent.
+- WhatsApp adapter: opt-in `requirePhoneNumberId` (`WHATSAPP_REQUIRE_PHONE_NUMBER_ID=1`),
+  which ignores webhook changes addressed to another `phone_number_id` or carrying none;
+  `templateBody` (`WHATSAPP_TEMPLATE_BODY`); and opt-in `confirmDecisions`
+  (`WHATSAPP_CONFIRM_DECISIONS=1`), which replies "Decision recorded: … by … at …" to the
+  presser after a press.
+- **`enforceLimits: true`** on the Telegram, Slack and WhatsApp adapters: count message
+  text in UTF-16 code units (never fewer than the platform's characters), and for
+  WhatsApp also refuse a variable with four or more spaces in a row and a template body
+  over the limit once the variables are filled in, so nobody approves text the platform
+  might cut. Off by default.
+- Message-limit constants `TELEGRAM_MAX_MESSAGE_LENGTH` (4096),
+  `SLACK_MAX_SECTION_TEXT_LENGTH` (3000) and `WHATSAPP_MAX_TEMPLATE_BODY_LENGTH` (1024),
+  each overridable (`maxMessageLength`, `maxSectionTextLength`, `maxTemplateBodyLength`),
+  and `TelegramPollingConflictError`. Every field added to `SlackConfig`,
+  `TelegramConfig` and `WhatsAppConfig` is optional, and a resolved config that sets none
+  of them has exactly the 0.2.0 keys, so config objects written for 0.2.0 still compile.
+- **Python client: `create_intent(fields, agent_secret_key, *, agent_id, intent_id=None,
+  created_at=None)`** builds and signs an Intent with every rule of the reference's
+  `createIntent`; byte-identical to the reference for the same id and time (checked
+  against the vectors and, through `tsx`, against the reference itself).
+- **Python client: `FileReceiptLog`**, a file-backed receipt log in the reference's format
+  (same lines, hash chain and head) with `append`, `record`, `read`, `history`, `head`,
+  `verify_chain` and `verify_all`. Every write is fsync'd. A torn last line is handled
+  exactly as the reference does: it raises by default, and with `repair_torn_tail=True`
+  reads report it in `tornTails` without changing the file while the writer quarantines
+  it before its next append (`repair()` on demand). Logs written by either
+  implementation verify in the other with identical reports.
+- Python client: interop tests against the TypeScript reference (skipped when Node is not
+  installed).
+- `tests/canonical-rfc8785.test.ts` pins where canonical JSON already matches RFC 8785
+  (numbers, string escapes, UTF-16 key order, the RFC's own examples) and where it differs
+  (lone surrogates, duplicate keys). Behaviour unchanged.
+
+### Fixed
+- **`ReceiptLog` no longer glues a receipt onto a last entry that lost its newline.**
+  In 0.2.0 an append to a file whose last whole entry had no trailing newline (a crash
+  between the entry and its newline, or a hand edit) joined the two on one line, and
+  every later read threw "corrupt". Now, by default, the append path writes the missing
+  newline first, but only after the rest of the file has been read without error and only
+  when the last segment is this log's own last chain entry (its seq, its hash and its link
+  to the line before). An append that fails (a corrupt line elsewhere) writes nothing, as
+  in 0.2.0. Nothing is cut or moved, reads never write, and any other last segment is left
+  exactly as in 0.2.0. The Python `FileReceiptLog` does the same.
+- Python client: `webauthn-p256:` passkey descriptors are checked as strictly as in the
+  reference (canonical base64url, 65 bytes, uncompressed-point marker); before, any
+  non-empty string passed.
+- Python client: a receipt carrying `"webauthn": null` no longer verifies as a plain
+  ed25519 receipt, matching the reference.
+- Python client: `create_intent` raises `CountersignError` naming the field for a lone
+  UTF-16 surrogate in any text field, instead of a raw `UnicodeEncodeError`. The
+  reference accepts such an Intent; the difference is written up in
+  `docs/proposals/0005`.
+- Docs, the WhatsApp example and `.env.example` now agree that `WHATSAPP_APP_SECRET` is
+  required.
+- The Telegram example and guide name the approver by the presser's user id
+  (`TELEGRAM_APPROVER_ID`), which differs from the chat id in groups.
+
+### Docs
+- `docs/proposals/`: seven written proposals from the first reference deployment (content
+  binding, approver-receipt deadline checks, withdraw and change-requested, a signed
+  receipt chain, RFC 8785 canonical JSON, resumable decisions, Route delivery and message
+  limits). Not applied; no spec, schema or vector change.
+- SECURITY.md and the security review no longer describe the spec as v0.1, and the review
+  no longer claims the keyed self-anchoring receipt log shipped in v0.2.
+- README: "Durable before anyone acts", "Keep the Intents too" and a new "Resumable
+  decisions" section; adapters guide covers WhatsApp approver delivery, Slack app/team
+  pinning and how Telegram approvers are identified.
 
 ### Security
 - **Spec §4 finality enforced at the shared layer.** `PendingDecisions` keeps a

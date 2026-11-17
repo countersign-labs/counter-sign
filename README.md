@@ -81,6 +81,26 @@ A Countersignature is byte-for-byte the same shape and equally verifiable
 whichever adapter produced it — receipts don't care whether the yes came
 from a chat button, an email link, or a passkey ceremony.
 
+**What the chat adapters guarantee.** They refuse, before sending, a request
+the platform would reject anyway (Telegram over 4096 characters, a Slack
+section over 3000, a WhatsApp variable with a newline or tab). With
+`enforceLimits: true` they also refuse what the platform might cut or reject
+under its stricter count (UTF-16 code units; for WhatsApp, a template body
+over 1024 characters or a run of four spaces), so an approver always sees the
+full text they are approving. Each limit is an exported constant you can
+override. Stricter identity settings are opt-in and leave 0.2.0 behaviour
+alone until set: WhatsApp `recipientMode: "approvers"` sends the template to
+the `whatsapp:<number>` approvers the Intent names (`"single"` sends to
+`WHATSAPP_TO` and refuses anyone else's Intent; with no mode, every request
+goes to `WHATSAPP_TO` as before), `requirePhoneNumberId` only believes
+webhooks for your business number, and `confirmDecisions` replies to each
+press. Set `SLACK_APP_ID` / `SLACK_TEAM_ID` so a correctly signed payload from
+another Slack app or workspace is refused. In Telegram poll mode, a second
+process polling the same bot fails waiting requests with
+`TelegramPollingConflictError` instead of looping. After a decision, the
+message says who decided and when, from the signed receipt. Setup for each is
+in [adapters/README.md](adapters/README.md).
+
 **Two-person / M-of-N approval.** Set `quorum: N` on an Intent to require N
 *distinct* approvers before the action runs; any single approver vetoes. Two
 strengths exist, and the Intent's `approvers` declare which one you get:
@@ -225,6 +245,138 @@ tamper-evidence that needs no external anchor, put SQLite, Postgres, or a
 *signed* transparency log behind the `ReceiptSink` interface. (A keyed,
 self-anchoring chain — a signed head on every append — is on the roadmap.)
 
+**Durable before anyone acts.** Each append is flushed to disk (`fdatasync`)
+before `record()` resolves, so the guarded action never runs on an approval a
+power cut could take back; `{ fsync: false }` turns it off. Flushing each
+append and restoring a lost final newline (see the changelog) are the
+`ReceiptLog`'s new defaults; the flush adds latency to each append. (On macOS,
+`fdatasync` reaches the drive but not always its cache.)
+
+**A torn last line** (a crash in the middle of an append) makes reads throw, as
+in 0.2.0, unless you opt in with `{ repairTornTail: true }`. Then:
+
+- reads skip it, and `verifyAll` lists it in the report's `tornTails` (and
+  `ok` is false). Reading never changes the file, so an auditor can open the
+  log while the writer appends: a half-written line it happens to see is
+  reported, never cut off;
+- only the instance that appends repairs: before each append it moves a torn
+  end into `receipts.jsonl.quarantine.jsonl` and cuts the log back to its last
+  whole line. `await receiptLog.repair()` does the same on demand; call it only
+  from the writer;
+- each `tornTails` entry says whether its bytes are `quarantined` or still at
+  the end of the file. It stays listed until you have looked at the quarantine
+  file and archived it.
+
+A bad line anywhere *else* is never repaired: reads throw, because that is not a
+crash, it is damage. The `ReceiptFault` reasons are the same as in 0.2.0; torn
+tails are reported only in `tornTails`, which is absent from a report unless the
+log opted in or has a quarantine file.
+
+**Keep the Intents too.** A vouched receipt names only an `intent_id`, so it
+cannot be audited without the Intent it decides. Pass `{ intents: true }` and
+each Intent is kept beside its receipts in `receipts.jsonl.intents.jsonl`,
+written and flushed before them; the receipts file itself does not change.
+`verifyAll` then uses the stored Intents when you supply none, checking each
+one's agent signature, so an edited Intent faults its receipts instead of
+vouching for them:
+
+```ts
+const receiptLog = new ReceiptLog("./receipts.jsonl", { intents: true });
+// …
+await receiptLog.verifyAll({ authorityKey: OUR_AUTHORITY_PUBLIC_KEY, trustedAgentKeys: [OUR_AGENT_PUBLIC_KEY] });
+```
+
+Any store works behind the `IntentStore` interface; `FileIntentStore` is the
+file-backed default.
+
+## Resumable decisions
+
+`wrapAction` waits in memory, and so do the adapters. A restart forgets every
+Intent still waiting, and an Intent waited on again afterwards has no memory of
+being decided. When a decision may take hours or days, give it a
+`PendingStore` and use `DurableDecisions`: issue the Intent now, resolve it
+later, in this process or after a restart.
+
+```ts
+import { DurableDecisions, FilePendingStore, ReceiptLog } from "@countersignlabs/counter-sign";
+
+const store = await FilePendingStore.open("./state/pending.jsonl");
+const receiptLog = new ReceiptLog("./state/receipts.jsonl", { intents: true });
+const decisions = new DurableDecisions({ adapter, store, receiptLog });
+
+// At start-up, before anything else:
+const { rearmed, lapsed, completed } = await decisions.restore();
+
+// To ask:
+await decisions.issue(intent);                 // stored, then delivered
+const resolution = await decisions.decide(intent);
+if (resolution.decision === "approve") await post();
+```
+
+Every decision goes in one order: the answer (or the Default) is verified, made
+final in the store, written to the receipt log, and only then handed back.
+`restore()` reads the store and, for each Intent:
+
+- still inside its window: waits again for the time it has left, not a fresh
+  window (re-delivering it if its first delivery never finished);
+- deadline passed while the process was down: mints the signed Default;
+- decided before the restart but not yet logged: logs it, and does not ask again;
+- already holding a final receipt in the log: takes that decision, and does not
+  ask again.
+
+An Intent is decided once. The store's `finalize` is first-wins, and a decision
+already in the store or the log is returned, never re-asked. If delivery fails
+and reached nobody, the Intent is marked abandoned rather than left to time out
+unseen. If it reached some approvers but not others (a `DeliveryPartialError`),
+those reached already hold live buttons, so the Intent stays pending and their
+answer counts; `issue()` returns the record with the approvers it missed in
+`unreached` instead of throwing. Nothing delivers to only those: issue a new
+Intent to ask them. In `restore()`, a re-delivery that fails outright abandons
+the Intent only if no earlier delivery reached anyone; if one did, it stays
+pending and re-armed, and the failure is listed in the report's
+`redeliveryFailed`.
+
+**One writer per store.** Run exactly one process per store file; the lock
+catches mistakes, it is not a distributed lock. `FilePendingStore.open` takes a
+lock file (`pending.jsonl.lock`, holding the pid, host, process start time and a
+random token) and keeps it fresh with a heartbeat. A second process opening the
+same store gets an error. On the same host a lock is taken over when its process
+is gone, or when its heartbeat is older than `lockLeaseMs` (default 10 seconds; a
+reused pid, or a wedged owner). A lock naming this process's own pid is the
+container case: either an earlier run (a crash-restart, where the pid is the
+same every time) or a live twin (two containers sharing a hostname and pid 1,
+as with host networking and a shared volume). It is taken over only when its
+last heartbeat predates this process and is older than two heartbeat intervals,
+so a crash-restart opens at once (or after waiting out those two intervals, if
+it restarted faster) and a live twin is refused. A lock from another host never
+is taken over. Taking over is atomic, so of two processes starting together
+exactly one gets the lock. Every write checks, before and after it appends, that
+the lock is still this handle's and that the file holds only what this handle
+wrote; if not, the write rejects, this handle does not act on it, and the handle
+stops writing. If the event landed, the store's next holder (or the next open)
+replays it, so a rejected issue may still be delivered and a rejected decision
+may still be logged. The receipt log has the
+same rule: one process writes each file.
+
+`restore()` reads each Intent's deadline from the Intent itself. A record it
+cannot restore (for example a stored Intent or decision that no longer verifies)
+is listed in the report's `failed`, with the error, and the others are still
+restored. A stored Intent is checked first, so an edited one is never delivered
+again to anyone.
+
+`wrapAction(fn, fields, adapter, { receiptLog, pendingStore: store })` uses the
+same path (opt-in; without `pendingStore` nothing changes). It returns the
+action's result, not the record: to learn which approvers a partial delivery
+missed, pass `onDelivered: (record) => …` (the list is in `record.unreached`),
+or read it from the store with `store.get(intent.intent_id)`. The wrapped function
+does not run after a restart, since its arguments died with the process: act on
+what `restore()` returns. Adapter authors can also hand a store to
+`new PendingDecisions({ store })` and call `restore()` before the first `wait()`;
+a decided Intent then stays decided across restarts. An adapter that takes
+`pending` or `pendingStore` in its config (`PendingDecisionsSource`) builds its
+book-keeping with `pendingDecisionsFor(config)`, which falls back to a new
+in-memory `PendingDecisions` when neither is set.
+
 ## Compliance and evidence
 
 counter-sign gives regulated teams a machine-enforceable, auditable
@@ -248,6 +400,8 @@ npx @countersignlabs/console --data-dir ./my-org --open
 
 It's single-org and self-hosted: it reads and writes only the data directory you point it at, has no login (the only authority is holding an admin key), and the admin's signing key never leaves the browser — each policy change is signed client-side and validated server-side against `verifyChain` plus a fail-closed semantic gate. Source: [`apps/console`](apps/console).
 
+`resolveRule` turns a policy rule into an Intent's approvers. By default they are keyed, from the approver registry. For chat approvals, pass `{ approvers: "vouched" }` (quorum 1 only; a rule with any other quorum is refused, never downgraded) to get vouched approvers a chat adapter accepts, and add `channel: "slack"` to keep only that channel's members.
+
 ## Repository layout
 
 | Path | What |
@@ -257,6 +411,9 @@ It's single-org and self-hosted: it reads and writes only the data directory you
 | `src/` | Reference implementation: core, shim, adapters (TypeScript, Node 20+, ESM) |
 | `examples/` | One runnable demo per adapter + offline local/email demos |
 | `adapters/` | Per-channel setup guides |
+| `vectors/` | Language-neutral conformance vectors |
+| `clients/python/` | Python client: verify receipts, create Intents (`create_intent`), and keep a receipt log in the reference's file format (`FileReceiptLog`) that either side can write and verify — see its [README](clients/python/README.md) |
+| `docs/proposals/` | Written proposals from the first reference deployment (content binding, receipt deadlines, withdraw, a signed receipt chain, RFC 8785, resumable decisions, Route delivery). Not applied; the wire format is unchanged |
 
 ## Licensing
 

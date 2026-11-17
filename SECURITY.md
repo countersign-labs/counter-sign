@@ -25,8 +25,8 @@ once a fix is released.
 
 ## Supported versions
 
-counter-sign is pre-1.0 (spec v0.1). Security fixes land on `main` and in the
-latest published `0.x` release. Older `0.x` releases are not separately patched.
+counter-sign is pre-1.0 (spec v0.2, draft). Security fixes land on `main` and
+in the latest published `0.x` release. Older `0.x` releases are not separately patched.
 
 | Version | Supported |
 | ------- | --------- |
@@ -45,7 +45,7 @@ In scope:
 
 Out of scope:
 
-- authority-key **distribution/pinning** — deliberately deployment policy in v0.1
+- authority-key **distribution/pinning** — deliberately deployment policy in v0.2
   (documented in the spec and `docs/security-review.md`);
 - misconfiguration explicitly warned against (e.g. `quorum > 1` with
   `default: approve`, which the library refuses to construct);
@@ -56,4 +56,5 @@ Out of scope:
 The threat model and the fixes applied to date are documented in
 [`docs/security-review.md`](docs/security-review.md). The spec's normative
 security requirements are in `spec/countersign-spec.md` §5. Signed conformance
-vectors live in [`examples/payloads/`](examples/payloads/).
+vectors live in [`vectors/`](vectors/) (language-neutral, used by the TypeScript and
+Python suites) and [`examples/payloads/`](examples/payloads/).

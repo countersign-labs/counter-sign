@@ -1,4 +1,8 @@
-# counter-sign security review — v0.1
+# counter-sign security review — v0.1 to v0.2
+
+A running record: each section below is headed by the release it reviewed, from
+the first v0.1 pass to the v0.2 per-approver-key quorum. The current spec and
+package are v0.2; the signing contexts named in CS-02 are now the `-v0.2` labels.
 
 Adversarial review of the protocol and reference implementation, with fixes
 applied in the same pass. Scope: the crypto core, the shim, all five
@@ -191,8 +195,9 @@ properties, not bugs — the reference behaviour is unchanged, the wording is.
 - **ReceiptLog is not standalone tamper-evident.** The chain is keyless SHA-256:
   a writer who tampers can recompute every downstream `prev` and pass
   `verifyChain`. Real tamper-evidence requires an externally-anchored `head()`
-  (`expectedHead`). Docs/comments/site now say so; **v0.2** adds a keyed,
-  self-anchoring chain (a signed head per append).
+  (`expectedHead`). Docs/comments/site now say so; a keyed, self-anchoring
+  chain (a signed head per append) is still **planned**: it did not ship in
+  v0.2 (spec §6).
 - **Quorum four-eyes is authority-enforced, not cryptographic separation of
   duty.** Distinctness is over `actor` strings the single authority key vouches
   for, so a holder of that key can mint N distinct receipts. Spec §1 "Trust

@@ -12,10 +12,11 @@ rewrite the file can recompute every hash, so tamper evidence comes only from a
 `verifyAll({ expectedHead })`.
 
 Kaviyam runs one approvals router per workspace. To make the log mean anything it
-has to build an anchoring job: a root-owned timer that verifies the log hourly,
-appends `{at, length, hash}` to an append-only file, and once a week sends the head
-to the owner's chat so a copy lives off the box. Every deployment will need a
-version of that, and between anchors a rewrite is still undetectable.
+has to build an anchoring job: a scheduled check, run by an account the router
+cannot act as, that verifies the log, appends `{at, length, hash}` to an
+append-only file, and regularly sends the head somewhere off the machine. Every
+deployment will need a version of that, and between anchors a rewrite is still
+undetectable.
 
 ## What the head signature should cover, and who signs
 
